@@ -21,6 +21,8 @@ export class AmbientEngine {
     // Time tracking for water waves / sprite bobbing
     this.time = 0;
     
+    this.otherPlayers = {}; // multiplayer roster mapping
+    
     this.initializeMap();
     this.initializePlayer();
     this.initializeCitizens();
@@ -188,6 +190,20 @@ export class AmbientEngine {
         }
       }
       
+      // Check if clicked on other multiplayer player
+      if (!clickedCitizen) {
+        for (const id in this.otherPlayers) {
+          const op = this.otherPlayers[id];
+          const drawX = (op.x + (op.targetX - op.x) * op.moveProgress);
+          const drawY = (op.y + (op.targetY - op.y) * op.moveProgress);
+          if (Math.abs(worldX - (drawX * this.tileSize + this.tileSize/2)) < this.tileSize/2 &&
+              Math.abs(worldY - (drawY * this.tileSize + this.tileSize/2)) < this.tileSize/2) {
+            clickedCitizen = op;
+            break;
+          }
+        }
+      }
+      
       if (clickedCitizen) {
         this.onCitizenClick(clickedCitizen);
       } else {
@@ -209,6 +225,54 @@ export class AmbientEngine {
         }
       }
     });
+  }
+
+  // Sockets helpers for Multiplayer Sync
+  addOtherPlayer(playerInfo) {
+    this.otherPlayers[playerInfo.id] = {
+      id: playerInfo.id,
+      name: playerInfo.name,
+      color: playerInfo.color,
+      x: playerInfo.x,
+      y: playerInfo.y,
+      targetX: playerInfo.x,
+      targetY: playerInfo.y,
+      moving: false,
+      moveProgress: 0,
+      facing: playerInfo.facing || 'down',
+      chatBubble: null,
+      chatTimer: 0,
+      job: 'Player',
+      thought: 'Visiting this village...',
+      status: 'active'
+    };
+  }
+  
+  removeOtherPlayer(id) {
+    delete this.otherPlayers[id];
+  }
+  
+  updateOtherPlayerPosition(id, x, y, facing) {
+    const op = this.otherPlayers[id];
+    if (op) {
+      op.facing = facing;
+      if (op.x !== x || op.y !== y) {
+        op.x = op.targetX;
+        op.y = op.targetY;
+        op.targetX = x;
+        op.targetY = y;
+        op.moving = true;
+        op.moveProgress = 0;
+      }
+    }
+  }
+  
+  showOtherPlayerChat(id, text) {
+    const op = this.otherPlayers[id];
+    if (op) {
+      op.chatBubble = text;
+      op.chatTimer = 180;
+    }
   }
   
   isTileWalkable(x, y) {
@@ -282,6 +346,24 @@ export class AmbientEngine {
     }
     
     this.onNearCitizen(nearCitizen);
+    
+    // Update other players positions and chat bubble timers
+    for (const id in this.otherPlayers) {
+      const op = this.otherPlayers[id];
+      if (op.moving) {
+        op.moveProgress += 0.15; // standard speed
+        if (op.moveProgress >= 1) {
+          op.x = op.targetX;
+          op.y = op.targetY;
+          op.moving = false;
+          op.moveProgress = 0;
+        }
+      }
+      if (op.chatBubble) {
+        op.chatTimer--;
+        if (op.chatTimer <= 0) op.chatBubble = null;
+      }
+    }
     
     // Update chat bubble timers
     if (this.player.chatBubble) {
@@ -436,12 +518,20 @@ export class AmbientEngine {
     // Render Citizens
     this.citizens.forEach(cit => this.drawCharacter(cit));
     
+    // Render Other Multiplayer Players
+    for (const id in this.otherPlayers) {
+      this.drawCharacter(this.otherPlayers[id]);
+    }
+    
     // Render Local Player
     this.drawCharacter(this.player);
     
     // Render Speech bubbles (in a separate pass so they draw on top of everything)
     this.drawChatBubble(this.player);
     this.citizens.forEach(cit => this.drawChatBubble(cit));
+    for (const id in this.otherPlayers) {
+      this.drawChatBubble(this.otherPlayers[id]);
+    }
     
     ctx.restore();
   }

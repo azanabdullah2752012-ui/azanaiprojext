@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './App.css';
+import { io } from 'socket.io-client';
 import { AmbientEngine } from './engine/AmbientEngine';
 import { InputController } from './engine/Input';
 import { AIConsole } from './components/AIConsole';
@@ -9,6 +10,12 @@ export default function App() {
   const canvasRef = useRef(null);
   const engineRef = useRef(null);
   const inputRef = useRef(null);
+  const socketRef = useRef(null);
+  
+  // Login / Profile customization
+  const [joined, setJoined] = useState(false);
+  const [username, setUsername] = useState('');
+  const [selectedColor, setSelectedColor] = useState('#00f0ff');
   
   // Tabs: 'inspector' or 'logs'
   const [activeTab, setActiveTab] = useState('inspector');
@@ -18,34 +25,44 @@ export default function App() {
   // Game metrics
   const [simTime, setSimTime] = useState({ hour: 8, minute: 0 });
   const [playerCoords, setPlayerCoords] = useState({ x: 10, y: 13 });
+  const [populationCount, setPopulationCount] = useState(2);
   
   // Chat logs
   const [messages, setMessages] = useState([
     {
       sender: 'System',
       time: '08:00 AM',
-      text: 'CivilOS Initialized. Active Citizens: 2. Version 0.1.',
-      type: 'system'
-    },
-    {
-      sender: 'System',
-      time: '08:00 AM',
-      text: 'Ambient Engine Renderer Online. Use WASD or Arrow Keys to move.',
+      text: 'CivilOS Initialized. Active Citizens: 2. Version 0.2.0.',
       type: 'system'
     }
   ]);
 
-  // Hook to run the game loop
-  useEffect(() => {
-    if (!canvasRef.current) return;
+  const colorPresets = ['#00f0ff', '#ff007f', '#39ff14', '#ffb700', '#aa3bff'];
+
+  // Start world socket connection
+  const handleEnterWorld = (e) => {
+    e.preventDefault();
+    if (!username.trim()) return;
     
-    // Set explicit canvas size
+    // Switch state
+    setJoined(true);
+  };
+
+  // Hook to handle canvas initialization, game loop, and sockets
+  useEffect(() => {
+    if (!canvasRef.current || !joined) return;
+    
     const canvas = canvasRef.current;
     canvas.width = 720;
     canvas.height = 540;
     
     const input = new InputController();
     inputRef.current = input;
+    
+    // Connect to local Socket.io server
+    const serverUrl = `http://${window.location.hostname}:3001`;
+    const socket = io(serverUrl);
+    socketRef.current = socket;
     
     const engine = new AmbientEngine(
       canvas,
@@ -61,23 +78,93 @@ export default function App() {
     );
     engineRef.current = engine;
     
+    // Update player parameters in engine
+    engine.player.name = username;
+    engine.player.color = selectedColor;
+    
+    // Emit join signal
+    socket.emit('join-world', {
+      name: username,
+      color: selectedColor,
+      x: engine.player.x,
+      y: engine.player.y
+    });
+
+    // Socket Event listeners
+    socket.on('connect', () => {
+      console.log('[Socket] Connected to backend server');
+    });
+    
+    socket.on('world-state', (data) => {
+      // Load current online players
+      data.players.forEach(p => {
+        engine.addOtherPlayer(p);
+      });
+      setPopulationCount(2 + Object.keys(engine.otherPlayers).length);
+    });
+    
+    socket.on('player-joined', (newPlayer) => {
+      engine.addOtherPlayer(newPlayer);
+      setPopulationCount(2 + Object.keys(engine.otherPlayers).length);
+    });
+    
+    socket.on('player-moved', (data) => {
+      engine.updateOtherPlayerPosition(data.id, data.x, data.y, data.facing);
+    });
+    
+    socket.on('player-left', (data) => {
+      engine.removeOtherPlayer(data.id);
+      setPopulationCount(2 + Object.keys(engine.otherPlayers).length);
+      
+      // If we had this player inspected, close inspector
+      setSelectedCitizen(prev => prev && prev.id === data.id ? null : prev);
+    });
+    
+    socket.on('chat-sync', (msg) => {
+      setMessages((prev) => [...prev, msg]);
+      
+      // Draw bubble overlay if a player spoke
+      if (msg.type === 'player') {
+        if (msg.id === socket.id) {
+          engine.player.chatBubble = msg.text;
+          engine.player.chatTimer = 180;
+        } else {
+          engine.showOtherPlayerChat(msg.id, msg.text);
+        }
+      }
+    });
+    
     let animationFrameId;
     let lastTime = 0;
     let timeTickAcc = 0;
+    
+    let lastSentX = engine.player.x;
+    let lastSentY = engine.player.y;
     
     const gameLoop = (timestamp) => {
       if (!lastTime) lastTime = timestamp;
       const delta = timestamp - lastTime;
       lastTime = timestamp;
       
-      // Update simulation logic
+      // Update simulator steps
       engine.update(input);
       
-      // Draw simulation layers
-      engine.draw();
-      
-      // Sync React states occasionally
+      // Sync coordinates to state
       setPlayerCoords({ x: engine.player.x, y: engine.player.y });
+      
+      // Trigger socket send on movement cell transition
+      if (engine.player.moving && (lastSentX !== engine.player.targetX || lastSentY !== engine.player.targetY)) {
+        socket.emit('move-player', {
+          x: engine.player.targetX,
+          y: engine.player.targetY,
+          facing: engine.player.facing
+        });
+        lastSentX = engine.player.targetX;
+        lastSentY = engine.player.targetY;
+      }
+      
+      // Draw screen layers
+      engine.draw();
       
       // Clock simulation: 1 second real-time = 5 minutes game-time
       timeTickAcc += delta;
@@ -96,7 +183,6 @@ export default function App() {
       
       // Check E key press interaction
       if (input.consumeKey('e') && engine.citizens.length > 0) {
-        // Find nearest citizen to talk to
         let target = null;
         for (const cit of engine.citizens) {
           const dist = Math.sqrt(Math.pow(engine.player.x - cit.x, 2) + Math.pow(engine.player.y - cit.y, 2));
@@ -118,32 +204,23 @@ export default function App() {
     
     return () => {
       cancelAnimationFrame(animationFrameId);
+      socket.disconnect();
     };
-  }, []);
+  }, [joined]);
   
-  // Perform conversation trigger in local single-player prototype mode
+  // Dialog trigger with NPC
   const triggerNPCInteraction = (npc) => {
-    // Player speech bubble
     const engine = engineRef.current;
     if (!engine) return;
     
-    engine.player.chatBubble = "Hello there!";
-    engine.player.chatTimer = 120; // frame count
-    
     const timeStr = formatTime(simTime.hour, simTime.minute);
     
-    // Add player chat to logs
-    setMessages((prev) => [
-      ...prev,
-      {
-        sender: 'You',
-        time: timeStr,
-        text: 'Hello there!',
-        type: 'player'
-      }
-    ]);
+    // Instead of local mock only, send a chat message so it logs locally and fits the log pipeline
+    if (socketRef.current) {
+      socketRef.current.emit('send-chat', { text: `Hello, ${npc.name}!` });
+    }
     
-    // NPC responds shortly after
+    // NPC responds
     setTimeout(() => {
       let npcReply = '';
       if (npc.id === 'npc_alex') {
@@ -165,56 +242,14 @@ export default function App() {
         }
       ]);
       
-      // Auto inspect clicked NPC when talking
       setSelectedCitizen(npc);
       setActiveTab('inspector');
     }, 600);
   };
   
   const handleSendMessage = (text) => {
-    const timeStr = formatTime(simTime.hour, simTime.minute);
-    
-    // Add to message feed
-    setMessages((prev) => [
-      ...prev,
-      {
-        sender: 'You',
-        time: timeStr,
-        text: text,
-        type: 'player'
-      }
-    ]);
-    
-    // Draw bubble on player character
-    if (engineRef.current) {
-      engineRef.current.player.chatBubble = text;
-      engineRef.current.player.chatTimer = 180;
-    }
-    
-    // Simple command handling or random AI reaction
-    if (nearCitizen) {
-      setTimeout(() => {
-        const responses = [
-          "That sounds intriguing. Tell me more.",
-          "I'm keeping busy with my daily shift.",
-          "CivilOS keeps this town running smoothly.",
-          "Our economy depends on good trade."
-        ];
-        const randomResp = responses[Math.floor(Math.random() * responses.length)];
-        
-        nearCitizen.chatBubble = randomResp;
-        nearCitizen.chatTimer = 180;
-        
-        setMessages((prev) => [
-          ...prev,
-          {
-            sender: nearCitizen.name,
-            time: timeStr,
-            text: randomResp,
-            type: 'citizen'
-          }
-        ]);
-      }, 800);
+    if (socketRef.current) {
+      socketRef.current.emit('send-chat', { text: text });
     }
   };
   
@@ -232,7 +267,7 @@ export default function App() {
         <header className="viewport-header">
           <div className="title-area">
             <h1 className="main-title">CivilOS Simulator</h1>
-            <span className="subtitle">Ambient Engine Canvas • v0.1</span>
+            <span className="subtitle">Ambient Engine Canvas • v0.2.0 (Multiplayer)</span>
           </div>
           <div className="stats-bar">
             <div className="stat-item">
@@ -245,15 +280,107 @@ export default function App() {
             </div>
             <div className="stat-item">
               <span className="stat-label">Population</span>
-              <span className="stat-value">2 Citizens</span>
+              <span className="stat-value">{populationCount} online</span>
             </div>
           </div>
         </header>
 
         <div className="canvas-wrapper">
-          <canvas ref={canvasRef}></canvas>
+          {/* Canvas Element */}
+          <canvas ref={canvasRef} style={{ filter: !joined ? 'blur(10px)' : 'none' }}></canvas>
           
-          {nearCitizen && (
+          {/* Login / Swatch overlay */}
+          {!joined && (
+            <div style={{
+              position: 'absolute',
+              top: 0, left: 0, right: 0, bottom: 0,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              background: 'rgba(5, 7, 12, 0.45)',
+              zIndex: 10
+            }}>
+              <form onSubmit={handleEnterWorld} style={{
+                background: 'var(--glass-bg)',
+                border: '1px solid var(--glass-border)',
+                borderRadius: 'var(--border-radius-lg)',
+                padding: '36px',
+                width: '380px',
+                display: 'flex', flexDirection: 'column', gap: 20,
+                backdropFilter: 'blur(20px)',
+                boxShadow: '0 20px 50px rgba(0,0,0,0.5)'
+              }}>
+                <div style={{ textAlign: 'center', marginBottom: 10 }}>
+                  <h2 style={{ textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>
+                    Enter Civilization
+                  </h2>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Configure profile for multiplayer sync</span>
+                </div>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: '10px', textTransform: 'uppercase', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>Username</label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={15}
+                    placeholder="Enter name..."
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    style={{
+                      background: 'var(--bg-primary)',
+                      border: '1px solid var(--glass-border)',
+                      borderRadius: 'var(--border-radius-sm)',
+                      padding: '12px 16px',
+                      color: 'var(--text-main)',
+                      fontFamily: 'var(--font-sans)',
+                      fontSize: '14px',
+                      outline: 'none'
+                    }}
+                  />
+                </div>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <label style={{ fontSize: '10px', textTransform: 'uppercase', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>Avatar Hue</label>
+                  <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+                    {colorPresets.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => setSelectedColor(color)}
+                        style={{
+                          width: '28px', height: '28px',
+                          borderRadius: '50%',
+                          background: color,
+                          border: selectedColor === color ? '2px solid #fff' : '2px solid transparent',
+                          boxShadow: selectedColor === color ? `0 0 10px ${color}` : 'none',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease'
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+                
+                <button type="submit" style={{
+                  background: 'var(--accent-cyan)',
+                  color: 'var(--bg-primary)',
+                  border: 'none',
+                  borderRadius: 'var(--border-radius-sm)',
+                  padding: '12px',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                  letterSpacing: '1px',
+                  cursor: 'pointer',
+                  boxShadow: `0 0 15px var(--accent-cyan-glow)`,
+                  transition: 'all 0.3s ease',
+                  marginTop: 10
+                }}>
+                  INITIALIZE CONNECT
+                </button>
+              </form>
+            </div>
+          )}
+          
+          {joined && nearCitizen && (
             <div style={{
               position: 'absolute',
               top: '20px',
@@ -267,20 +394,23 @@ export default function App() {
               fontFamily: 'var(--font-mono)',
               color: '#fff',
               boxShadow: '0 0 10px rgba(255, 0, 127, 0.5)',
-              pointerEvents: 'none'
+              pointerEvents: 'none',
+              zIndex: 5
             }}>
               Press [E] to talk to {nearCitizen.name}
             </div>
           )}
           
-          <div className="controls-overlay">
-            <div className="control-pill">
-              <span style={{ color: 'var(--accent-cyan)' }}>WASD / Arrows</span> Move Avatar
+          {joined && (
+            <div className="controls-overlay">
+              <div className="control-pill">
+                <span style={{ color: 'var(--accent-cyan)' }}>WASD / Arrows</span> Move Avatar
+              </div>
+              <div className="control-pill">
+                <span style={{ color: 'var(--accent-cyan)' }}>Mouse Click</span> Inspect Citizen
+              </div>
             </div>
-            <div className="control-pill">
-              <span style={{ color: 'var(--accent-cyan)' }}>Mouse Click</span> Inspect Citizen
-            </div>
-          </div>
+          )}
         </div>
       </div>
 
