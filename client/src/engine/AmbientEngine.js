@@ -1,12 +1,13 @@
 // AmbientEngine - Canvas-based retro rendering and movement logic
 
 export class AmbientEngine {
-  constructor(canvas, onCitizenClick, onNearCitizen) {
+  constructor(canvas, onCitizenClick, onNearCitizen, onGridClick) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     
     this.onCitizenClick = onCitizenClick;
     this.onNearCitizen = onNearCitizen; // Trigger popup prompt: (citizenId) or null
+    this.onGridClick = onGridClick;
     
     this.tileSize = 32; // pixel size of one grid cell
     this.scale = 2;     // canvas rendering scale (retro feel)
@@ -356,9 +357,12 @@ export class AmbientEngine {
             thought: 'Exploring CivilOS...',
             status: 'active',
             color: '#00f0ff',
-            inventory: ['Apple x3', 'Map x1'],
+            inventory: this.player.inventory, // pass real local inventory
             money: 45
           });
+        } else {
+          // Fire general grid coordinate click
+          this.onGridClick(gridX, gridY);
         }
       }
     });

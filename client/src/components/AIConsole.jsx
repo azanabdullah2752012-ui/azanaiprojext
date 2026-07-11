@@ -1,6 +1,6 @@
 import React from 'react';
 
-export function AIConsole({ selectedCitizen }) {
+export function AIConsole({ selectedCitizen, onUseItem }) {
   if (!selectedCitizen) {
     return (
       <div className="empty-inspector">
@@ -61,12 +61,48 @@ export function AIConsole({ selectedCitizen }) {
         <div className="inspector-section">
           <span className="section-label">Inventory</span>
           <div className="memory-list">
-            {(selectedCitizen.inventory || ['Iron Ore x2', 'Hammer x1', 'Bread x1']).map((item, idx) => (
-              <div key={idx} className="memory-item" style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <span>📦 {item.split(' ')[0]}</span>
-                <span style={{ color: 'var(--accent-cyan)' }}>{item.split(' ')[1] || 'x1'}</span>
-              </div>
-            ))}
+            {(selectedCitizen.inventory || []).map((item, idx) => {
+              const name = item.split(' x')[0];
+              const count = item.split(' x')[1] || '1';
+              
+              let actionText = '';
+              if (['Apple', 'Bread'].includes(name)) actionText = 'Eat';
+              else if (name === 'Wood') actionText = 'Build Wall';
+              else if (name === 'Iron Ore') actionText = 'Place Anvil';
+              else if (name === 'Wheat Seed') actionText = 'Plant Crop';
+              
+              return (
+                <div key={idx} className="memory-item" style={{ 
+                  flexDirection: 'row', 
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}>
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <span style={{ fontWeight: 500 }}>📦 {name}</span>
+                    <span style={{ color: 'var(--accent-cyan)', fontSize: '10px', fontFamily: 'var(--font-mono)' }}>Quantity: x{count}</span>
+                  </div>
+                  
+                  {isPlayer && actionText && (
+                    <button
+                      onClick={() => onUseItem(name)}
+                      style={{
+                        background: 'var(--bg-tertiary)',
+                        border: '1px solid var(--glass-border)',
+                        color: 'var(--accent-cyan)',
+                        borderRadius: '4px',
+                        padding: '4px 8px',
+                        fontSize: '10px',
+                        fontFamily: 'var(--font-mono)',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      {actionText}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 

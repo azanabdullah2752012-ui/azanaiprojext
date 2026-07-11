@@ -32,6 +32,8 @@ export default function App() {
   const [simTime, setSimTime] = useState({ hour: 8, minute: 0 });
   const [playerCoords, setPlayerCoords] = useState({ x: 32, y: 34 });
   const [populationCount, setPopulationCount] = useState(6);
+  const [playerEnergy, setPlayerEnergy] = useState(100);
+  const [activeBuildItem, setActiveBuildItem] = useState(null);
   
   // Chat logs
   const [messages, setMessages] = useState([
@@ -80,6 +82,12 @@ export default function App() {
       // Near citizen trigger callback
       (citizen) => {
         setNearCitizen(citizen);
+      },
+      // Grid click callback
+      (x, y) => {
+        if (triggerGridBuildRef.current) {
+          triggerGridBuildRef.current(x, y);
+        }
       }
     );
     engineRef.current = engine;
@@ -185,6 +193,7 @@ export default function App() {
           }
           return { hour: h, minute: m };
         });
+        setPlayerEnergy((e) => Math.max(0, e - 1));
         timeTickAcc = 0;
       }
       
@@ -369,6 +378,165 @@ export default function App() {
       }));
     }
   };
+
+  const handleUseItem = (name) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+
+    const timeStr = formatTime(simTime.hour, simTime.minute);
+
+    if (['Apple', 'Bread'].includes(name)) {
+      const playerList = [...engine.player.inventory];
+      const itemIdx = playerList.findIndex(i => i.startsWith(name + ' x') || i === name);
+      if (itemIdx === -1) return;
+
+      const parts = playerList[itemIdx].split(' x');
+      const count = parseInt(parts[1] || '1', 10);
+      if (count > 1) {
+        playerList[itemIdx] = `${name} x${count - 1}`;
+      } else {
+        playerList.splice(itemIdx, 1);
+      }
+
+      const val = name === 'Apple' ? 15 : 30;
+      let newEnergy = 100;
+      setPlayerEnergy((prev) => {
+        newEnergy = Math.min(100, prev + val);
+        return newEnergy;
+      });
+
+      engine.player.inventory = playerList;
+      setPlayerInventory(playerList);
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: 'System',
+          time: timeStr,
+          text: `You consumed 1 ${name}. Energy is restored by +${val}% to ${newEnergy}%.`,
+          type: 'system'
+        }
+      ]);
+
+      if (selectedCitizen && selectedCitizen.id === 'local_player') {
+        setSelectedCitizen(prev => ({
+          ...prev,
+          inventory: playerList
+        }));
+      }
+    } else if (['Wood', 'Iron Ore', 'Wheat Seed'].includes(name)) {
+      setActiveBuildItem(name);
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: 'System',
+          time: timeStr,
+          text: `Build Mode: ${name} selected. Click an adjacent empty tile on the map to place/plant.`,
+          type: 'system'
+        }
+      ]);
+    }
+  };
+
+  const handleGridBuild = (x, y, itemName) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+
+    const dist = Math.sqrt(Math.pow(engine.player.x - x, 2) + Math.pow(engine.player.y - y, 2));
+    if (dist > 2.5) {
+      const timeStr = formatTime(simTime.hour, simTime.minute);
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: 'System',
+          time: timeStr,
+          text: `Too far away to build there! Move closer.`,
+          type: 'system'
+        }
+      ]);
+      return;
+    }
+
+    if (engine.structureMap[y][x] !== 0) {
+      const timeStr = formatTime(simTime.hour, simTime.minute);
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: 'System',
+          time: timeStr,
+          text: `Cannot place there! Coordinates already contain a structure.`,
+          type: 'system'
+        }
+      ]);
+      return;
+    }
+
+    if (engine.terrainMap[y][x] === 2) {
+      const timeStr = formatTime(simTime.hour, simTime.minute);
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: 'System',
+          time: timeStr,
+          text: `Cannot build on water!`,
+          type: 'system'
+        }
+      ]);
+      return;
+    }
+
+    const playerList = [...engine.player.inventory];
+    const itemIdx = playerList.findIndex(i => i.startsWith(itemName + ' x') || i === itemName);
+    if (itemIdx === -1) return;
+
+    const parts = playerList[itemIdx].split(' x');
+    const count = parseInt(parts[1] || '1', 10);
+    if (count > 1) {
+      playerList[itemIdx] = `${itemName} x${count - 1}`;
+    } else {
+      playerList.splice(itemIdx, 1);
+    }
+
+    if (itemName === 'Wood') {
+      engine.structureMap[y][x] = 1;
+    } else if (itemName === 'Iron Ore') {
+      engine.structureMap[y][x] = 3;
+    } else if (itemName === 'Wheat Seed') {
+      engine.structureMap[y][x] = 5;
+    }
+
+    engine.player.inventory = playerList;
+    setPlayerInventory(playerList);
+    setActiveBuildItem(null);
+
+    const timeStr = formatTime(simTime.hour, simTime.minute);
+    setMessages((prev) => [
+      ...prev,
+      {
+        sender: 'System',
+        time: timeStr,
+        text: `Successfully placed ${itemName} at grid cell X: ${x}, Y: ${y}.`,
+        type: 'system'
+      }
+    ]);
+
+    if (selectedCitizen && selectedCitizen.id === 'local_player') {
+      setSelectedCitizen(prev => ({
+        ...prev,
+        inventory: playerList
+      }));
+    }
+  };
+
+  const triggerGridBuildRef = useRef(null);
+  triggerGridBuildRef.current = (x, y) => {
+    if (activeBuildItemRef.current) {
+      handleGridBuild(x, y, activeBuildItemRef.current);
+    }
+  };
+
+  const activeBuildItemRef = useRef(null);
+  activeBuildItemRef.current = activeBuildItem;
   
   const formatTime = (h, m) => {
     const ampm = h >= 12 ? 'PM' : 'AM';
@@ -392,6 +560,10 @@ export default function App() {
               <span className="stat-value">{formatTime(simTime.hour, simTime.minute)}</span>
             </div>
             <div className="stat-item">
+              <span className="stat-label">Energy</span>
+              <span className="stat-value" style={{ color: playerEnergy < 30 ? '#ff0055' : 'var(--accent-cyan)' }}>{playerEnergy}%</span>
+            </div>
+            <div className="stat-item">
               <span className="stat-label">Position</span>
               <span className="stat-value">X: {playerCoords.x}, Y: {playerCoords.y}</span>
             </div>
@@ -403,6 +575,44 @@ export default function App() {
         </header>
 
         <div className="canvas-wrapper">
+          {joined && activeBuildItem && (
+            <div style={{
+              position: 'absolute',
+              top: '20px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: 'rgba(0, 240, 255, 0.95)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '6px',
+              padding: '8px 18px',
+              fontSize: '12px',
+              fontFamily: 'var(--font-mono)',
+              color: '#020205',
+              fontWeight: 'bold',
+              boxShadow: '0 0 15px rgba(0, 240, 255, 0.6)',
+              zIndex: 5,
+              display: 'flex',
+              gap: '12px',
+              alignItems: 'center'
+            }}>
+              🛠️ BUILD MODE: Click adjacent tile to place [{activeBuildItem}]
+              <button 
+                onClick={() => setActiveBuildItem(null)}
+                style={{
+                  background: '#020205',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '3px',
+                  padding: '2px 6px',
+                  fontSize: '9px',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
           {/* Canvas Element */}
           <canvas ref={canvasRef} style={{ filter: !joined ? 'blur(10px)' : 'none' }}></canvas>
           
@@ -592,7 +802,7 @@ export default function App() {
 
         <div className="sidebar-content">
           {activeTab === 'inspector' ? (
-            <AIConsole selectedCitizen={selectedCitizen} />
+            <AIConsole selectedCitizen={selectedCitizen} onUseItem={handleUseItem} />
           ) : (
             <ChatBox messages={messages} onSendMessage={handleSendMessage} />
           )}
