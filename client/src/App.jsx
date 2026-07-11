@@ -5,6 +5,7 @@ import { AmbientEngine } from './engine/AmbientEngine';
 import { InputController } from './engine/Input';
 import { AIConsole } from './components/AIConsole';
 import { ChatBox } from './components/ChatBox';
+import { NPCChatModal } from './components/NPCChatModal';
 
 export default function App() {
   const canvasRef = useRef(null);
@@ -21,6 +22,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('inspector');
   const [selectedCitizen, setSelectedCitizen] = useState(null);
   const [nearCitizen, setNearCitizen] = useState(null);
+  const [activeChatNPC, setActiveChatNPC] = useState(null);
   
   // Game metrics
   const [simTime, setSimTime] = useState({ hour: 8, minute: 0 });
@@ -193,7 +195,7 @@ export default function App() {
         }
         
         if (target) {
-          triggerNPCInteraction(target);
+          setActiveChatNPC(target);
         }
       }
       
@@ -261,6 +263,29 @@ export default function App() {
     if (socketRef.current) {
       socketRef.current.emit('send-chat', { text: text });
     }
+  };
+
+  const handleNPCChatBubble = (npcId, text) => {
+    const engine = engineRef.current;
+    if (engine) {
+      const npc = engine.citizens.find(c => c.id === npcId);
+      if (npc) {
+        npc.chatBubble = text;
+        npc.chatTimer = 180;
+        setSelectedCitizen(npc);
+        setActiveTab('inspector');
+      }
+    }
+    const timeStr = formatTime(simTime.hour, simTime.minute);
+    setMessages((prev) => [
+      ...prev,
+      {
+        sender: engine?.citizens.find(c => c.id === npcId)?.name || 'Citizen',
+        time: timeStr,
+        text: text,
+        type: 'citizen'
+      }
+    ]);
   };
   
   const formatTime = (h, m) => {
@@ -409,6 +434,14 @@ export default function App() {
             }}>
               Press [E] to talk to {nearCitizen.name}
             </div>
+          )}
+
+          {joined && activeChatNPC && (
+            <NPCChatModal
+              npc={activeChatNPC}
+              onClose={() => setActiveChatNPC(null)}
+              onSendMessage={handleNPCChatBubble}
+            />
           )}
           
           {joined && (

@@ -125,6 +125,123 @@ io.on('connection', (socket) => {
   });
 });
 
+// NPC profiles dictionary for system prompt injection
+const npcProfiles = {
+  npc_alex: {
+    name: 'Alex',
+    job: 'Blacksmith',
+    persona: 'helpful, hard-working, slightly gruff, uses blacksmithing terms (sparks, anvil, iron, forge). Keep replies under 3 sentences.'
+  },
+  npc_sarah: {
+    name: 'Sarah',
+    job: 'Baker',
+    persona: 'warm, friendly, cheerful, loves baking, smells like flour and honey, talks about fresh bread, cookies, and warmth. Keep replies under 3 sentences.'
+  },
+  npc_ethan: {
+    name: 'Ethan',
+    job: 'Mayor',
+    persona: 'polite, professional, visionary, loves organizing the town, proud of the community. Keep replies under 3 sentences.'
+  },
+  npc_lily: {
+    name: 'Lily',
+    job: 'Teacher',
+    persona: 'patient, enthusiastic, intelligent, loves teaching kids, asks questions, talks about lessons and reading. Keep replies under 3 sentences.'
+  },
+  npc_noah: {
+    name: 'Noah',
+    job: 'Farmer',
+    persona: 'grounded, practical, peaceful, speaks slow and relaxed, loves agriculture, crops, and weather. Keep replies under 3 sentences.'
+  },
+  npc_emma: {
+    name: 'Emma',
+    job: 'Doctor',
+    persona: 'empathetic, calm, analytical, cares deeply about health and well-being, gives health tips. Keep replies under 3 sentences.'
+  }
+};
+
+// HTTP Endpoint to proxy dialogue prompts to local Ollama instance
+app.post('/api/chat-npc', async (req, res) => {
+  const { npcId, history } = req.body;
+  const profile = npcProfiles[npcId] || { name: 'Citizen', job: 'Villager', persona: 'polite and friendly.' };
+
+  const systemPrompt = `You are ${profile.name}, the local ${profile.job} in the 2D village of AmbientSpaces.
+Your personality is: ${profile.persona}
+Answer in character. Keep answers very concise (1-3 sentences max). Speak naturally as if in a casual 2D dialogue game. Do not use emojis, and do not use markdown code blocks.`;
+
+  try {
+    // 1. Query local Ollama for available models
+    let modelName = 'qwen2.5-coder:3b'; // Default fallback
+    try {
+      const tagsResponse = await fetch('http://localhost:11434/api/tags');
+      if (tagsResponse.ok) {
+        const tagsData = await tagsResponse.json();
+        const availableModels = tagsData.models.map(m => m.name);
+        
+        // Match preferred models in order of capability
+        const preferences = ['qwen2.5-coder:7b', 'qwen2.5-coder:3b'];
+        const matched = preferences.find(pref => availableModels.includes(pref));
+        if (matched) {
+          modelName = matched;
+        } else if (availableModels.length > 0) {
+          modelName = availableModels[0]; // Take whatever is available
+        }
+      }
+    } catch (e) {
+      console.warn('[Ollama] Failed to fetch tags, using default fallback model name.', e.message);
+    }
+
+    console.log(`[Ollama] Chat request for ${profile.name} using model: ${modelName}`);
+
+    // Map client dialogue structure to Ollama API message inputs
+    const formattedHistory = (history || []).map(h => ({
+      role: h.role === 'system' ? 'system' : h.role === 'assistant' ? 'assistant' : 'user',
+      content: h.content || h.text
+    }));
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      ...formattedHistory
+    ];
+
+    // 2. Query local Ollama Chat Endpoint
+    const ollamaResponse = await fetch('http://localhost:11434/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: modelName,
+        messages: messages,
+        stream: false
+      })
+    });
+
+    if (!ollamaResponse.ok) {
+      throw new Error(`Ollama responded with status: ${ollamaResponse.status}`);
+    }
+
+    const data = await ollamaResponse.json();
+    const replyText = data.message.content.trim();
+
+    console.log(`[Ollama] Response generated for ${profile.name}: "${replyText}"`);
+    res.json({ text: replyText });
+
+  } catch (error) {
+    console.error('[Ollama Error] Failed to generate chat response:', error.message);
+    
+    // In case local Ollama is offline/not running, return an in-character mockup response
+    const fallbacks = {
+      npc_alex: "I'd love to chat, but the forge is calling! These horseshoe hammers won't make themselves.",
+      npc_sarah: "Oh dear, my baking timer is ringing! Let's talk more when the bread is out of the oven.",
+      npc_ethan: "Pardon me, but municipal duties await. Let's touch base later near the Town Square.",
+      npc_lily: "Class is starting, and the children are waiting. See you after school!",
+      npc_noah: "Sun is setting, got to head to the crop field now. See you around!",
+      npc_emma: "I have a patient checklist to finish. Stay safe and healthy!"
+    };
+    const fallbackText = fallbacks[npcId] || "I need to get back to my daily work. Let's chat later!";
+    
+    res.json({ text: `[Offline AI Fallback] ${fallbackText}` });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`=========================================`);
