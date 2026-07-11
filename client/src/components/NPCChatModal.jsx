@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-export function NPCChatModal({ npc, onClose, onSendMessage, playerMoney, playerItems, onTrade }) {
+export function NPCChatModal({ npc, onClose, onSendMessage, playerMoney, playerItems, onTrade, playerName }) {
   const [activeSubTab, setActiveSubTab] = useState('talk'); // 'talk' or 'trade'
   const [inputText, setInputText] = useState('');
   const [chatLog, setChatLog] = useState([
@@ -107,7 +107,8 @@ export function NPCChatModal({ npc, onClose, onSendMessage, playerMoney, playerI
         body: JSON.stringify({
           npcId: npc.id,
           message: userMessage,
-          history: history
+          history: history,
+          playerName: playerName || 'Traveler'
         })
       });
 

@@ -164,7 +164,7 @@ export default function App() {
       lastTime = timestamp;
       
       // Update simulator steps
-      engine.update(input);
+      engine.update(input, simTime.hour);
       
       // Sync coordinates to state
       setPlayerCoords({ x: engine.player.x, y: engine.player.y });
@@ -904,6 +904,7 @@ export default function App() {
               playerMoney={playerMoney}
               playerItems={playerInventory}
               onTrade={handleTrade}
+              playerName={username}
             />
           )}
 

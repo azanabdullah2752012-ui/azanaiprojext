@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
 require('dotenv').config();
+const db = require('./db');
 
 const app = express();
 app.use(cors());
@@ -161,14 +162,28 @@ const npcProfiles = {
 
 // HTTP Endpoint to proxy dialogue prompts to local Ollama instance
 app.post('/api/chat-npc', async (req, res) => {
-  const { npcId, history } = req.body;
+  const { npcId, history, playerName, message } = req.body;
   const profile = npcProfiles[npcId] || { name: 'Citizen', job: 'Villager', persona: 'polite and friendly.' };
-
-  const systemPrompt = `You are ${profile.name}, the local ${profile.job} in the 2D village of AmbientSpaces.
-Your personality is: ${profile.persona}
-Answer in character. Keep answers very concise (1-3 sentences max). Speak naturally as if in a casual 2D dialogue game. Do not use emojis, and do not use markdown code blocks.`;
+  const user = playerName || 'Traveler';
+  const playerMsg = message || 'Hello!';
 
   try {
+    // Fetch recent memories and trust from SQLite
+    const trust = await db.getTrustScore(npcId, user);
+    const memories = await db.getMemories(npcId, user, 5);
+
+    let memorySnippet = "";
+    if (memories.length > 0) {
+      memorySnippet = `\nRecent memories you have of interacting with ${user}:\n` +
+        memories.map(m => `- [Trust Change ${m.opinion_score}]: ${m.text}`).join('\n');
+    }
+
+    const systemPrompt = `You are ${profile.name}, the local ${profile.job} in the 2D village of AmbientSpaces.
+Your personality is: ${profile.persona}
+Your current relationship trust score with ${user} is ${trust}/100.
+${memorySnippet}
+Answer in character. Keep answers very concise (1-3 sentences max). Speak naturally as if in a casual 2D dialogue game. Do not use emojis, and do not use markdown code blocks.`;
+
     // 1. Query local Ollama for available models
     let modelName = 'qwen2.5-coder:3b'; // Default fallback
     try {
@@ -177,13 +192,12 @@ Answer in character. Keep answers very concise (1-3 sentences max). Speak natura
         const tagsData = await tagsResponse.json();
         const availableModels = tagsData.models.map(m => m.name);
         
-        // Match preferred models in order of capability
         const preferences = ['qwen2.5-coder:7b', 'qwen2.5-coder:3b'];
         const matched = preferences.find(pref => availableModels.includes(pref));
         if (matched) {
           modelName = matched;
         } else if (availableModels.length > 0) {
-          modelName = availableModels[0]; // Take whatever is available
+          modelName = availableModels[0];
         }
       }
     } catch (e) {
@@ -192,7 +206,6 @@ Answer in character. Keep answers very concise (1-3 sentences max). Speak natura
 
     console.log(`[Ollama] Chat request for ${profile.name} using model: ${modelName}`);
 
-    // Map client dialogue structure to Ollama API message inputs
     const formattedHistory = (history || []).map(h => ({
       role: h.role === 'system' ? 'system' : h.role === 'assistant' ? 'assistant' : 'user',
       content: h.content || h.text
@@ -222,12 +235,16 @@ Answer in character. Keep answers very concise (1-3 sentences max). Speak natura
     const replyText = data.message.content.trim();
 
     console.log(`[Ollama] Response generated for ${profile.name}: "${replyText}"`);
+
+    // 3. Save memory and update relationship trust score in SQLite
+    const result = await db.adjustTrustAndSaveMemory(npcId, user, playerMsg, replyText);
+    console.log(`[SQLite] Saved conversation memory for ${profile.name}. Trust score updated by ${result.delta} to ${result.trust}/100.`);
+
     res.json({ text: replyText });
 
   } catch (error) {
     console.error('[Ollama Error] Failed to generate chat response:', error.message);
     
-    // In case local Ollama is offline/not running, return an in-character mockup response
     const fallbacks = {
       npc_alex: "I'd love to chat, but the forge is calling! These horseshoe hammers won't make themselves.",
       npc_sarah: "Oh dear, my baking timer is ringing! Let's talk more when the bread is out of the oven.",
@@ -237,8 +254,16 @@ Answer in character. Keep answers very concise (1-3 sentences max). Speak natura
       npc_emma: "I have a patient checklist to finish. Stay safe and healthy!"
     };
     const fallbackText = fallbacks[npcId] || "I need to get back to my daily work. Let's chat later!";
+    const replyText = `[Offline AI Fallback] ${fallbackText}`;
+
+    // Still save the fallback interaction to SQLite so memory state is tracked
+    try {
+      await db.adjustTrustAndSaveMemory(npcId, user, playerMsg, replyText);
+    } catch (dbErr) {
+      console.error('[SQLite Error] Failed to save fallback memory:', dbErr.message);
+    }
     
-    res.json({ text: `[Offline AI Fallback] ${fallbackText}` });
+    res.json({ text: replyText });
   }
 });
 

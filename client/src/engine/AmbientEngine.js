@@ -33,6 +33,62 @@ export class AmbientEngine {
       '42,26': ['Gold Ring x1', 'Coins x100'], // Town Hall chest
       '9,41': ['Wheat Seed x15', 'Hoe x1']   // Farmer's chest
     };
+    this.npcSchedules = {
+      npc_alex: {
+        0: { x: 12, y: 10, activity: 'Sleeping in blacksmith cottage' },
+        8: { x: 11, y: 8, activity: 'Stoking anvil forge fire' },
+        12: { x: 32, y: 32, activity: 'Eating lunch at center plaza' },
+        13: { x: 11, y: 8, activity: 'Hammering iron tools' },
+        17: { x: 50, y: 52, activity: 'Strolling near the lake' },
+        20: { x: 12, y: 10, activity: 'Cleaning up forge workshop' },
+        21: { x: 12, y: 10, activity: 'Sleeping' }
+      },
+      npc_sarah: {
+        0: { x: 48, y: 44, activity: 'Sleeping in bakery bedroom' },
+        8: { x: 49, y: 42, activity: 'Baking fresh morning bread' },
+        12: { x: 32, y: 32, activity: 'Eating lunch at center plaza' },
+        13: { x: 49, y: 42, activity: 'Serving bread to customers' },
+        17: { x: 52, y: 52, activity: 'Relaxing near water bank' },
+        20: { x: 48, y: 44, activity: 'Closing down the ovens' },
+        21: { x: 48, y: 44, activity: 'Sleeping' }
+      },
+      npc_noah: {
+        0: { x: 9, y: 42, activity: 'Sleeping in farmer cottage' },
+        8: { x: 18, y: 44, activity: 'Watering the crop fields' },
+        12: { x: 32, y: 32, activity: 'Eating lunch at center plaza' },
+        13: { x: 18, y: 44, activity: 'Tilling fields and weeds' },
+        17: { x: 50, y: 52, activity: 'Enjoying the evening lake view' },
+        20: { x: 9, y: 42, activity: 'Sitting on cottage porch' },
+        21: { x: 9, y: 42, activity: 'Sleeping' }
+      },
+      npc_emma: {
+        0: { x: 52, y: 9, activity: 'Sleeping in clinic backroom' },
+        8: { x: 50, y: 8, activity: 'Tending clinic patients' },
+        12: { x: 32, y: 32, activity: 'Eating lunch at center plaza' },
+        13: { x: 50, y: 8, activity: 'Reviewing patient checkups' },
+        17: { x: 12, y: 12, activity: 'Taking a stroll down blacksmith alley' },
+        20: { x: 52, y: 9, activity: 'Filing medical prescriptions' },
+        21: { x: 52, y: 9, activity: 'Sleeping' }
+      },
+      npc_lily: {
+        0: { x: 39, y: 21, activity: 'Sleeping in school backroom' },
+        8: { x: 41, y: 19, activity: 'Teaching school children' },
+        12: { x: 32, y: 32, activity: 'Eating lunch at center plaza' },
+        13: { x: 41, y: 19, activity: 'Grading student notebooks' },
+        17: { x: 40, y: 28, activity: 'Reading book near Town Hall' },
+        20: { x: 39, y: 21, activity: 'Preparing tomorrow lessons' },
+        21: { x: 39, y: 21, activity: 'Sleeping' }
+      },
+      npc_ethan: {
+        0: { x: 35, y: 27, activity: 'Sleeping in Town Hall room' },
+        8: { x: 38, y: 27, activity: 'Reviewing budget papers' },
+        12: { x: 32, y: 32, activity: 'Eating lunch at center plaza' },
+        13: { x: 38, y: 27, activity: 'Meeting village delegates' },
+        17: { x: 32, y: 32, activity: 'Conducting inspector rounds' },
+        20: { x: 35, y: 27, activity: 'Reading municipal codes' },
+        21: { x: 35, y: 27, activity: 'Sleeping' }
+      }
+    };
     
     this.initializeMap();
     this.initializePlayer();
@@ -291,6 +347,10 @@ export class AmbientEngine {
         chatTimer: 0
       }
     ];
+
+    this.citizens.forEach(cit => {
+      cit.path = [];
+    });
   }
   
   setupClickEvent() {
@@ -369,6 +429,84 @@ export class AmbientEngine {
     });
   }
 
+  findPath(startX, startY, targetX, targetY) {
+    const cols = this.mapWidth;
+    const rows = this.mapHeight;
+    const openSet = [];
+    const closedSet = new Set();
+    
+    const startNode = {
+      x: startX,
+      y: startY,
+      g: 0,
+      h: Math.abs(startX - targetX) + Math.abs(startY - targetY),
+      f: 0,
+      parent: null
+    };
+    startNode.f = startNode.g + startNode.h;
+    
+    openSet.push(startNode);
+    
+    while (openSet.length > 0) {
+      openSet.sort((a, b) => a.f - b.f);
+      const current = openSet.shift();
+      
+      if (current.x === targetX && current.y === targetY) {
+        const path = [];
+        let curr = current;
+        while (curr.parent) {
+          path.push({ x: curr.x, y: curr.y });
+          curr = curr.parent;
+        }
+        return path.reverse();
+      }
+      
+      closedSet.add(`${current.x},${current.y}`);
+      
+      const directions = [
+        { x: 0, y: -1 },
+        { x: 0, y: 1 },
+        { x: -1, y: 0 },
+        { x: 1, y: 0 }
+      ];
+      
+      for (const dir of directions) {
+        const nx = current.x + dir.x;
+        const ny = current.y + dir.y;
+        
+        if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+        if (closedSet.has(`${nx},${ny}`)) continue;
+        
+        const isTarget = nx === targetX && ny === targetY;
+        if (!this.isTileWalkable(nx, ny) && !isTarget) continue;
+        
+        const gScore = current.g + 1;
+        const hScore = Math.abs(nx - targetX) + Math.abs(ny - targetY);
+        const fScore = gScore + hScore;
+        
+        const existingNode = openSet.find(node => node.x === nx && node.y === ny);
+        if (existingNode) {
+          if (gScore < existingNode.g) {
+            existingNode.g = gScore;
+            existingNode.f = fScore;
+            existingNode.parent = current;
+          }
+        } else {
+          openSet.push({
+            x: nx,
+            y: ny,
+            g: gScore,
+            h: hScore,
+            f: fScore,
+            parent: current
+          });
+        }
+      }
+    }
+    
+    return [];
+  }
+
   // Sockets helpers for Multiplayer Sync
   addOtherPlayer(playerInfo) {
     this.otherPlayers[playerInfo.id] = {
@@ -428,8 +566,67 @@ export class AmbientEngine {
     return true;
   }
   
-  update(inputController) {
+  update(inputController, currentHour = 8) {
     this.time += 0.05;
+
+    // 1. Update citizen position interpolation & step execution
+    this.citizens.forEach(cit => {
+      if (cit.moving) {
+        cit.moveProgress += 0.04; // slow walking speed
+        if (cit.moveProgress >= 1) {
+          cit.x = cit.targetX;
+          cit.y = cit.targetY;
+          cit.moving = false;
+          cit.moveProgress = 0;
+        }
+      }
+
+      if (!cit.moving && cit.path && cit.path.length > 0) {
+        const nextStep = cit.path.shift();
+        if (this.isTileWalkable(nextStep.x, nextStep.y)) {
+          cit.targetX = nextStep.x;
+          cit.targetY = nextStep.y;
+          cit.moving = true;
+          cit.moveProgress = 0;
+
+          if (nextStep.x > cit.x) cit.facing = 'right';
+          else if (nextStep.x < cit.x) cit.facing = 'left';
+          else if (nextStep.y > cit.y) cit.facing = 'down';
+          else if (nextStep.y < cit.y) cit.facing = 'up';
+        } else {
+          // Path blocked, recalculate A*
+          const finalTarget = cit.path[cit.path.length - 1] || nextStep;
+          cit.path = this.findPath(cit.x, cit.y, finalTarget.x, finalTarget.y);
+        }
+      }
+    });
+
+    // 2. Check schedules when citizen is idle
+    this.citizens.forEach(cit => {
+      if (!cit.moving && (!cit.path || cit.path.length === 0)) {
+        const scheds = this.npcSchedules[cit.id];
+        if (scheds) {
+          let activeHour = -1;
+          for (const hStr in scheds) {
+            const h = parseInt(hStr, 10);
+            if (h <= currentHour && h > activeHour) {
+              activeHour = h;
+            }
+          }
+          if (activeHour !== -1) {
+            const target = scheds[activeHour];
+            if (cit.x !== target.x || cit.y !== target.y) {
+              const path = this.findPath(cit.x, cit.y, target.x, target.y);
+              if (path && path.length > 0) {
+                cit.path = path;
+                cit.thought = target.activity;
+                cit.status = target.activity.includes('Sleeping') ? 'resting' : 'active';
+              }
+            }
+          }
+        }
+      }
+    });
     
     // Update Crop Growth (Farming mechanics)
     for (const coords in this.crops) {
