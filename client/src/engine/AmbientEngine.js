@@ -90,6 +90,7 @@ export class AmbientEngine {
       }
     };
     
+    this.lastHour = -1;
     this.initializeMap();
     this.initializePlayer();
     this.initializeCitizens();
@@ -254,7 +255,9 @@ export class AmbientEngine {
         thought: 'I should finish hammering this anvil iron soon.',
         status: 'working',
         chatBubble: null,
-        chatTimer: 0
+        chatTimer: 0,
+        inventory: ['Wood x4', 'Iron Ore x3', 'Hammer x1'],
+        money: 40
       },
       {
         id: 'npc_sarah',
@@ -272,7 +275,9 @@ export class AmbientEngine {
         thought: 'The bread ovens are heating up nicely today.',
         status: 'working',
         chatBubble: null,
-        chatTimer: 0
+        chatTimer: 0,
+        inventory: ['Wheat x2', 'Bread x3', 'Apple x2'],
+        money: 30
       },
       {
         id: 'npc_ethan',
@@ -290,7 +295,9 @@ export class AmbientEngine {
         thought: 'I need to review the municipal budget today.',
         status: 'active',
         chatBubble: null,
-        chatTimer: 0
+        chatTimer: 0,
+        inventory: ['Gold Ring x1'],
+        money: 100
       },
       {
         id: 'npc_lily',
@@ -308,7 +315,9 @@ export class AmbientEngine {
         thought: 'Preparing the lesson plan for the school children.',
         status: 'active',
         chatBubble: null,
-        chatTimer: 0
+        chatTimer: 0,
+        inventory: ['Book x2', 'Paper x10'],
+        money: 25
       },
       {
         id: 'npc_noah',
@@ -326,7 +335,9 @@ export class AmbientEngine {
         thought: 'The crops are growing tall. We need rain soon.',
         status: 'active',
         chatBubble: null,
-        chatTimer: 0
+        chatTimer: 0,
+        inventory: ['Wheat Seed x10', 'Wheat x4'],
+        money: 20
       },
       {
         id: 'npc_emma',
@@ -344,7 +355,9 @@ export class AmbientEngine {
         thought: 'Reviewing patient charts for the clinic checkups.',
         status: 'active',
         chatBubble: null,
-        chatTimer: 0
+        chatTimer: 0,
+        inventory: ['Medicine x2', 'Apple x5', 'Bandage x3'],
+        money: 50
       }
     ];
 
@@ -507,6 +520,117 @@ export class AmbientEngine {
     return [];
   }
 
+  runAutonomousEconomyTick() {
+    const addOrStackItem = (npc, itemStr) => {
+      const parts = itemStr.split(' x');
+      const name = parts[0];
+      const count = parseInt(parts[1] || '1', 10);
+      const existingIdx = npc.inventory.findIndex(i => i.startsWith(name + ' x') || i === name);
+      if (existingIdx !== -1) {
+        const existingParts = npc.inventory[existingIdx].split(' x');
+        const existingCount = parseInt(existingParts[1] || '1', 10);
+        npc.inventory[existingIdx] = `${name} x${existingCount + count}`;
+      } else {
+        npc.inventory.push(itemStr);
+      }
+    };
+
+    const hasItemCount = (npc, itemName, reqCount = 1) => {
+      const item = npc.inventory.find(i => i.startsWith(itemName + ' x') || i === itemName);
+      if (!item) return false;
+      const count = parseInt(item.split(' x')[1] || '1', 10);
+      return count >= reqCount;
+    };
+
+    const removeItemCount = (npc, itemName, reqCount = 1) => {
+      const idx = npc.inventory.findIndex(i => i.startsWith(itemName + ' x') || i === itemName);
+      if (idx === -1) return;
+      const parts = npc.inventory[idx].split(' x');
+      const count = parseInt(parts[1] || '1', 10);
+      if (count > reqCount) {
+        npc.inventory[idx] = `${itemName} x${count - reqCount}`;
+      } else {
+        npc.inventory.splice(idx, 1);
+      }
+    };
+
+    const farmer = this.citizens.find(c => c.id === 'npc_noah');
+    const baker = this.citizens.find(c => c.id === 'npc_sarah');
+    const blacksmith = this.citizens.find(c => c.id === 'npc_alex');
+    const mayor = this.citizens.find(c => c.id === 'npc_ethan');
+
+    // 1. Farmer gathers seeds and wheat
+    if (farmer) {
+      addOrStackItem(farmer, 'Wheat Seed x1');
+      if (Math.random() < 0.6) {
+        addOrStackItem(farmer, 'Wheat x1');
+      }
+    }
+
+    // 2. Baker bakes bread
+    if (baker) {
+      if (hasItemCount(baker, 'Wheat', 2)) {
+        removeItemCount(baker, 'Wheat', 2);
+        addOrStackItem(baker, 'Bread x1');
+        baker.chatBubble = "Ah, fresh hot bread baked! 🍞";
+        baker.chatTimer = 120;
+      }
+    }
+
+    // 3. Blacksmith hammers tools
+    if (blacksmith) {
+      if (hasItemCount(blacksmith, 'Iron Ore', 2) && hasItemCount(blacksmith, 'Wood', 1)) {
+        removeItemCount(blacksmith, 'Iron Ore', 2);
+        removeItemCount(blacksmith, 'Wood', 1);
+        addOrStackItem(blacksmith, 'Hammer x1');
+        blacksmith.chatBubble = "Forged a new iron hammer! 🔨";
+        blacksmith.chatTimer = 120;
+      }
+    }
+
+    // 4. Trade exchanges
+    if (baker && farmer) {
+      if (!hasItemCount(baker, 'Wheat', 2) && hasItemCount(farmer, 'Wheat', 1)) {
+        if (baker.money >= 4) {
+          baker.money -= 4;
+          farmer.money += 4;
+          removeItemCount(farmer, 'Wheat', 1);
+          addOrStackItem(baker, 'Wheat x1');
+          baker.chatBubble = "Bought wheat harvest from Noah!";
+          baker.chatTimer = 120;
+          farmer.chatBubble = "Sold wheat to Sarah Baker!";
+          farmer.chatTimer = 120;
+          console.log(`[Economy] Sarah bought 1 Wheat from Noah Farmer for 4 Coins.`);
+        }
+      }
+    }
+
+    if (blacksmith && farmer) {
+      if (!hasItemCount(blacksmith, 'Wood', 2) && hasItemCount(farmer, 'Wood', 1)) {
+        if (blacksmith.money >= 3) {
+          blacksmith.money -= 3;
+          farmer.money += 3;
+          removeItemCount(farmer, 'Wood', 1);
+          addOrStackItem(blacksmith, 'Wood x1');
+          console.log(`[Economy] Alex Blacksmith bought 1 Wood from Noah Farmer for 3 Coins.`);
+        }
+      }
+    }
+
+    // 5. Taxes collection at 6 PM
+    if (mayor && this.lastHour === 18) {
+      this.citizens.forEach(cit => {
+        if (cit.id !== 'npc_ethan' && cit.money >= 1) {
+          cit.money -= 1;
+          mayor.money += 1;
+        }
+      });
+      mayor.chatBubble = "Collected evening taxes! 💰";
+      mayor.chatTimer = 120;
+      console.log(`[Economy] Ethan (Mayor) collected evening taxes from citizens.`);
+    }
+  }
+
   // Sockets helpers for Multiplayer Sync
   addOtherPlayer(playerInfo) {
     this.otherPlayers[playerInfo.id] = {
@@ -568,6 +692,11 @@ export class AmbientEngine {
   
   update(inputController, currentHour = 8) {
     this.time += 0.05;
+
+    if (currentHour !== this.lastHour) {
+      this.lastHour = currentHour;
+      this.runAutonomousEconomyTick();
+    }
 
     // 1. Update citizen position interpolation & step execution
     this.citizens.forEach(cit => {
