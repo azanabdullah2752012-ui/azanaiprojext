@@ -22,6 +22,15 @@ export class AmbientEngine {
     this.time = 0;
     
     this.otherPlayers = {}; // multiplayer roster mapping
+    this.chests = {
+      '14,8': ['Iron Ore x5', 'Hammer x1'],
+      '51,42': ['Bread x6', 'Wheat x10'],
+      '23,17': ['Coins x20', 'Apple x2'],   // Player's chest
+      '43,17': ['Book x3', 'Paper x10'],     // School chest
+      '52,7': ['Bandage x4', 'Medicine x2'], // Clinic chest
+      '42,26': ['Gold Ring x1', 'Coins x100'], // Town Hall chest
+      '9,41': ['Wheat Seed x15', 'Hoe x1']   // Farmer's chest
+    };
     
     this.initializeMap();
     this.initializePlayer();
@@ -95,16 +104,20 @@ export class AmbientEngine {
 
     // Player default starting home (top-left)
     this.drawHouse(18, 16, 7, 6, 3, 1, 21, 21);
+    this.structureMap[17][23] = 5; // Player chest
 
     // School house (top-right)
     this.drawHouse(38, 16, 8, 7, 3, 1, 41, 22);
+    this.structureMap[17][43] = 5; // School chest
 
     // Doctor clinic (top-right)
     this.drawHouse(46, 6, 8, 6, 4, 1, 50, 11);
     this.structureMap[8][48] = 3; // Clinic bed/table
+    this.structureMap[7][52] = 5; // Clinic medicine chest
 
     // Town Hall (center top)
     this.drawHouse(33, 25, 10, 5, 4, 1, 38, 29);
+    this.structureMap[26][42] = 5; // Town Hall vault chest
 
     // Baker cottage (bottom-right)
     this.drawHouse(46, 40, 8, 6, 3, 1, 49, 45);
@@ -113,6 +126,7 @@ export class AmbientEngine {
 
     // Farmer cottage (bottom-left)
     this.drawHouse(8, 40, 7, 6, 3, 1, 11, 45);
+    this.structureMap[41][9] = 5; // Farmer seed chest
 
     // 5. Draw Lake / Water pond (bottom-right)
     for (let y = 48; y < 58; y++) {
@@ -159,7 +173,8 @@ export class AmbientEngine {
       facing: 'down',
       avatarType: 'human',
       chatBubble: null,
-      chatTimer: 0
+      chatTimer: 0,
+      inventory: ['Apple x3', 'Wood x10', 'Coins x50']
     };
   }
   

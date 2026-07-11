@@ -6,6 +6,7 @@ import { InputController } from './engine/Input';
 import { AIConsole } from './components/AIConsole';
 import { ChatBox } from './components/ChatBox';
 import { NPCChatModal } from './components/NPCChatModal';
+import { ChestModal } from './components/ChestModal';
 
 export default function App() {
   const canvasRef = useRef(null);
@@ -23,6 +24,9 @@ export default function App() {
   const [selectedCitizen, setSelectedCitizen] = useState(null);
   const [nearCitizen, setNearCitizen] = useState(null);
   const [activeChatNPC, setActiveChatNPC] = useState(null);
+  const [nearChest, setNearChest] = useState(null);
+  const [activeChest, setActiveChest] = useState(null);
+  const [playerInventory, setPlayerInventory] = useState(['Apple x3', 'Wood x10', 'Coins x50']);
   
   // Game metrics
   const [simTime, setSimTime] = useState({ hour: 8, minute: 0 });
@@ -79,6 +83,7 @@ export default function App() {
       }
     );
     engineRef.current = engine;
+    setPlayerInventory(engine.player.inventory);
     
     // Update player parameters in engine
     engine.player.name = username;
@@ -184,18 +189,36 @@ export default function App() {
       }
       
       // Check E key press interaction
-      if (input.consumeKey('e') && engine.citizens.length > 0) {
-        let target = null;
-        for (const cit of engine.citizens) {
-          const dist = Math.sqrt(Math.pow(engine.player.x - cit.x, 2) + Math.pow(engine.player.y - cit.y, 2));
-          if (dist <= 1.5) {
-            target = cit;
-            break;
-          }
+      // Find nearest chest
+      let currentNearChest = null;
+      const px = engine.player.x;
+      const py = engine.player.y;
+      for (const coords in engine.chests) {
+        const [cx, cy] = coords.split(',').map(Number);
+        const dist = Math.sqrt(Math.pow(px - cx, 2) + Math.pow(py - cy, 2));
+        if (dist <= 1.5) {
+          currentNearChest = { coords, items: engine.chests[coords] };
+          break;
         }
-        
-        if (target) {
-          setActiveChatNPC(target);
+      }
+      setNearChest(currentNearChest);
+      
+      // Check E key press interaction
+      if (input.consumeKey('e')) {
+        if (currentNearChest) {
+          setActiveChest(currentNearChest);
+        } else if (engine.citizens.length > 0) {
+          let target = null;
+          for (const cit of engine.citizens) {
+            const dist = Math.sqrt(Math.pow(engine.player.x - cit.x, 2) + Math.pow(engine.player.y - cit.y, 2));
+            if (dist <= 1.5) {
+              target = cit;
+              break;
+            }
+          }
+          if (target) {
+            setActiveChatNPC(target);
+          }
         }
       }
       
@@ -286,6 +309,65 @@ export default function App() {
         type: 'citizen'
       }
     ]);
+  };
+
+  const handleTransferItem = (idx, direction) => {
+    const engine = engineRef.current;
+    if (!engine || !activeChest) return;
+
+    const chestCoords = activeChest.coords;
+    const chestList = [...engine.chests[chestCoords]];
+    const playerList = [...engine.player.inventory];
+
+    const addOrStackItem = (list, itemStr) => {
+      const parts = itemStr.split(' x');
+      const name = parts[0];
+      const count = parseInt(parts[1] || '1', 10);
+      
+      const existingIdx = list.findIndex(i => i.startsWith(name + ' x') || i === name);
+      if (existingIdx !== -1) {
+        const existingParts = list[existingIdx].split(' x');
+        const existingCount = parseInt(existingParts[1] || '1', 10);
+        list[existingIdx] = `${name} x${existingCount + count}`;
+      } else {
+        list.push(itemStr);
+      }
+    };
+
+    const removeItem = (list, itemIndex) => {
+      const itemStr = list[itemIndex];
+      const parts = itemStr.split(' x');
+      const name = parts[0];
+      const count = parseInt(parts[1] || '1', 10);
+      
+      if (count > 1) {
+        list[itemIndex] = `${name} x${count - 1}`;
+      } else {
+        list.splice(itemIndex, 1);
+      }
+      return `${name} x1`;
+    };
+
+    if (direction === 'take') {
+      const movedItem = removeItem(chestList, idx);
+      addOrStackItem(playerList, movedItem);
+    } else if (direction === 'deposit') {
+      const movedItem = removeItem(playerList, idx);
+      addOrStackItem(chestList, movedItem);
+    }
+
+    engine.chests[chestCoords] = chestList;
+    engine.player.inventory = playerList;
+
+    setPlayerInventory(playerList);
+    setActiveChest({ coords: chestCoords, items: chestList });
+
+    if (selectedCitizen && selectedCitizen.id === 'local_player') {
+      setSelectedCitizen(prev => ({
+        ...prev,
+        inventory: playerList
+      }));
+    }
   };
   
   const formatTime = (h, m) => {
@@ -436,11 +518,42 @@ export default function App() {
             </div>
           )}
 
+          {joined && nearChest && !activeChest && !activeChatNPC && (
+            <div style={{
+              position: 'absolute',
+              top: '20px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: 'rgba(255, 183, 0, 0.9)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '6px',
+              padding: '6px 16px',
+              fontSize: '12px',
+              fontFamily: 'var(--font-mono)',
+              color: '#fff',
+              boxShadow: '0 0 10px rgba(255, 183, 0, 0.5)',
+              pointerEvents: 'none',
+              zIndex: 5
+            }}>
+              Press [E] to open Storage Chest
+            </div>
+          )}
+
           {joined && activeChatNPC && (
             <NPCChatModal
               npc={activeChatNPC}
               onClose={() => setActiveChatNPC(null)}
               onSendMessage={handleNPCChatBubble}
+            />
+          )}
+
+          {joined && activeChest && (
+            <ChestModal
+              chestCoords={activeChest.coords}
+              chestItems={activeChest.items}
+              playerItems={playerInventory}
+              onClose={() => setActiveChest(null)}
+              onTransferItem={handleTransferItem}
             />
           )}
           
