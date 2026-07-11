@@ -25,14 +25,14 @@ export default function App() {
   // Game metrics
   const [simTime, setSimTime] = useState({ hour: 8, minute: 0 });
   const [playerCoords, setPlayerCoords] = useState({ x: 10, y: 13 });
-  const [populationCount, setPopulationCount] = useState(2);
+  const [populationCount, setPopulationCount] = useState(6);
   
   // Chat logs
   const [messages, setMessages] = useState([
     {
       sender: 'System',
       time: '08:00 AM',
-      text: 'CivilOS Initialized. Active Citizens: 2. Version 0.2.0.',
+      text: 'CivilOS Initialized. Active Citizens: 6. Version 0.2.0.',
       type: 'system'
     }
   ]);
@@ -100,12 +100,12 @@ export default function App() {
       data.players.forEach(p => {
         engine.addOtherPlayer(p);
       });
-      setPopulationCount(2 + Object.keys(engine.otherPlayers).length);
+      setPopulationCount(6 + Object.keys(engine.otherPlayers).length);
     });
     
     socket.on('player-joined', (newPlayer) => {
       engine.addOtherPlayer(newPlayer);
-      setPopulationCount(2 + Object.keys(engine.otherPlayers).length);
+      setPopulationCount(6 + Object.keys(engine.otherPlayers).length);
     });
     
     socket.on('player-moved', (data) => {
@@ -114,7 +114,7 @@ export default function App() {
     
     socket.on('player-left', (data) => {
       engine.removeOtherPlayer(data.id);
-      setPopulationCount(2 + Object.keys(engine.otherPlayers).length);
+      setPopulationCount(6 + Object.keys(engine.otherPlayers).length);
       
       // If we had this player inspected, close inspector
       setSelectedCitizen(prev => prev && prev.id === data.id ? null : prev);
@@ -227,6 +227,16 @@ export default function App() {
         npcReply = "Greetings, traveler! I'm tending the anvil forge. Looking for quality tools?";
       } else if (npc.id === 'npc_sarah') {
         npcReply = "Hi! Smells good, right? Just finished baking a fresh batch of bread.";
+      } else if (npc.id === 'npc_ethan') {
+        npcReply = "Hello! I am Mayor Ethan. Welcome to our village! Let me know if you need anything.";
+      } else if (npc.id === 'npc_lily') {
+        npcReply = "Hi there! I'm Lily, the local teacher. Class is starting soon!";
+      } else if (npc.id === 'npc_noah') {
+        npcReply = "Howdy! I'm Noah, the farmer. Hard work pays off, but it's peaceful here.";
+      } else if (npc.id === 'npc_emma') {
+        npcReply = "Hello, traveler. I'm Dr. Emma. Stay healthy, and drink plenty of water!";
+      } else {
+        npcReply = "Hello! Nice to meet you.";
       }
       
       npc.chatBubble = npcReply;
