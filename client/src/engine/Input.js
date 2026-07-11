@@ -7,15 +7,17 @@ export class InputController {
   setupListeners() {
     window.addEventListener('keydown', (e) => {
       const key = e.key.toLowerCase();
-      // Map arrow keys and wasd
-      if (['w', 'a', 's', 'd', 'arrowup', 'arrowleft', 'arrowdown', 'arrowright', 'e', 'escape'].includes(key)) {
+      if (key === ' ') {
+        e.preventDefault();
+      }
+      if (['w', 'a', 's', 'd', 'arrowup', 'arrowleft', 'arrowdown', 'arrowright', 'e', 'escape', ' '].includes(key)) {
         this.keys[key] = true;
       }
     });
 
     window.addEventListener('keyup', (e) => {
       const key = e.key.toLowerCase();
-      if (['w', 'a', 's', 'd', 'arrowup', 'arrowleft', 'arrowdown', 'arrowright', 'e', 'escape'].includes(key)) {
+      if (['w', 'a', 's', 'd', 'arrowup', 'arrowleft', 'arrowdown', 'arrowright', 'e', 'escape', ' '].includes(key)) {
         this.keys[key] = false;
       }
     });
