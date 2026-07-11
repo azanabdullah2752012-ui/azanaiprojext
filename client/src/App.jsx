@@ -26,7 +26,7 @@ export default function App() {
   
   // Game metrics
   const [simTime, setSimTime] = useState({ hour: 8, minute: 0 });
-  const [playerCoords, setPlayerCoords] = useState({ x: 10, y: 13 });
+  const [playerCoords, setPlayerCoords] = useState({ x: 32, y: 34 });
   const [populationCount, setPopulationCount] = useState(6);
   
   // Chat logs

@@ -11,9 +11,9 @@ export class AmbientEngine {
     this.tileSize = 32; // pixel size of one grid cell
     this.scale = 2;     // canvas rendering scale (retro feel)
     
-    // Map dimensions: 32x24 grid
-    this.mapWidth = 32;
-    this.mapHeight = 24;
+    // Map dimensions: 64x64 grid
+    this.mapWidth = 64;
+    this.mapHeight = 64;
     
     // Camera center offset
     this.camera = { x: 0, y: 0 };
@@ -30,6 +30,18 @@ export class AmbientEngine {
     this.setupClickEvent();
   }
   
+  drawHouse(xStart, yStart, width, height, floorType, wallType, doorX, doorY) {
+    for (let y = yStart; y < yStart + height; y++) {
+      for (let x = xStart; x < xStart + width; x++) {
+        this.terrainMap[y][x] = floorType;
+        if (y === yStart || y === yStart + height - 1 || x === xStart || x === xStart + width - 1) {
+          this.structureMap[y][x] = wallType;
+        }
+      }
+    }
+    this.structureMap[doorY][doorX] = 0; // walkable doorway
+  }
+
   initializeMap() {
     // Layer 1: Terrain (0 = Grass, 1 = Road, 2 = Water, 3 = Wood Floor, 4 = Stone Floor)
     this.terrainMap = Array(this.mapHeight).fill(null).map(() => Array(this.mapWidth).fill(0));
@@ -37,74 +49,112 @@ export class AmbientEngine {
     // Layer 2: Structures (0 = Empty, 1 = Wall/Brick, 2 = Tree, 3 = Table, 4 = Chair, 5 = Chest, 6 = Water Edge/Fence)
     this.structureMap = Array(this.mapHeight).fill(null).map(() => Array(this.mapWidth).fill(0));
     
-    // Draw paths/roads (horizontal street and vertical alley)
+    // 1. Build map boundary trees to act as borders
+    for (let y = 0; y < this.mapHeight; y++) {
+      this.structureMap[y][0] = 2;
+      this.structureMap[y][this.mapWidth - 1] = 2;
+    }
     for (let x = 0; x < this.mapWidth; x++) {
-      this.terrainMap[12][x] = 1;
-      this.terrainMap[13][x] = 1;
+      this.structureMap[0][x] = 2;
+      this.structureMap[this.mapHeight - 1][x] = 2;
     }
-    for (let y = 6; y < 18; y++) {
-      this.terrainMap[y][10] = 1;
-      this.terrainMap[y][11] = 1;
+
+    // 2. Draw Main roads (vertical and horizontal cross street in center)
+    for (let y = 1; y < this.mapHeight - 1; y++) {
+      this.terrainMap[y][31] = 1;
+      this.terrainMap[y][32] = 1;
     }
-    
-    // Create a lake at top-right
-    for (let y = 1; y < 7; y++) {
-      for (let x = 20; x < 30; x++) {
+    for (let x = 1; x < this.mapWidth - 1; x++) {
+      this.terrainMap[31][x] = 1;
+      this.terrainMap[32][x] = 1;
+    }
+
+    // 3. Draw Side roads connecting sectors
+    // Blacksmith Road (top-left)
+    for (let y = 8; y <= 31; y++) {
+      this.terrainMap[y][12] = 1;
+    }
+    // Clinic/School Road (top-right)
+    for (let x = 32; x <= 50; x++) {
+      this.terrainMap[15][x] = 1;
+    }
+    // Farmer Road (bottom-left)
+    for (let x = 11; x <= 31; x++) {
+      this.terrainMap[45][x] = 1;
+    }
+    // Baker Road (bottom-right)
+    for (let y = 32; y <= 45; y++) {
+      this.terrainMap[y][49] = 1;
+    }
+
+    // 4. Construct Village Buildings
+    // Blacksmith cottage (top-left)
+    this.drawHouse(8, 6, 8, 6, 4, 1, 12, 11);
+    this.structureMap[8][10] = 3; // Forge anvil table
+    this.structureMap[8][14] = 5; // Blacksmith storage chest
+
+    // Player default starting home (top-left)
+    this.drawHouse(18, 16, 7, 6, 3, 1, 21, 21);
+
+    // School house (top-right)
+    this.drawHouse(38, 16, 8, 7, 3, 1, 41, 22);
+
+    // Doctor clinic (top-right)
+    this.drawHouse(46, 6, 8, 6, 4, 1, 50, 11);
+    this.structureMap[8][48] = 3; // Clinic bed/table
+
+    // Town Hall (center top)
+    this.drawHouse(33, 25, 10, 5, 4, 1, 38, 29);
+
+    // Baker cottage (bottom-right)
+    this.drawHouse(46, 40, 8, 6, 3, 1, 49, 45);
+    this.structureMap[42][48] = 3; // Baker counter
+    this.structureMap[42][51] = 5; // Baker yeast chest
+
+    // Farmer cottage (bottom-left)
+    this.drawHouse(8, 40, 7, 6, 3, 1, 11, 45);
+
+    // 5. Draw Lake / Water pond (bottom-right)
+    for (let y = 48; y < 58; y++) {
+      for (let x = 45; x < 60; x++) {
         this.terrainMap[y][x] = 2;
-        this.structureMap[y][x] = 6; // solid water
+        this.structureMap[y][x] = 6;
       }
     }
-    
-    // Place trees around the lake and map borders
-    const trees = [
-      [2,18], [3,18], [4,19], [6,19], [7,20], [7,22], [7,25], [7,28],
-      [1,1], [2,1], [1,2], [8,3], [9,4], [10,2], [18,4], [19,3], [20,5],
-      [22,10], [21,9], [22,12], [22,13], [20,28], [21,29], [18,30]
-    ];
-    trees.forEach(([ty, tx]) => {
-      if (ty < this.mapHeight && tx < this.mapWidth) {
+
+    // 6. Draw Crop Fields (bottom-left)
+    for (let y = 40; y <= 48; y++) {
+      for (let x = 16; x <= 26; x++) {
+        this.terrainMap[y][x] = 1; // Dirt/farming floor
+        // Place crop indicators procedurally
+        if ((x + y) % 2 === 0) {
+          this.structureMap[y][x] = 5; // use chest index as crop placeholder
+        }
+      }
+    }
+
+    // 7. Decorate world with random trees
+    for (let i = 0; i < 60; i++) {
+      const tx = Math.floor(Math.random() * (this.mapWidth - 2)) + 1;
+      const ty = Math.floor(Math.random() * (this.mapHeight - 2)) + 1;
+      // Do not overwrite roads, buildings or water
+      if (this.terrainMap[ty][tx] === 0 && this.structureMap[ty][tx] === 0) {
         this.structureMap[ty][tx] = 2; // Tree
       }
-    });
-    
-    // House 1: Blacksmith cottage (top-left) - Stone floor
-    for (let y = 2; y <= 6; y++) {
-      for (let x = 3; x <= 8; x++) {
-        this.terrainMap[y][x] = 4; // Stone floor
-        if (y === 2 || y === 6 || x === 3 || x === 8) {
-          // Walls around cottage
-          this.structureMap[y][x] = 1; 
-        }
-      }
     }
-    this.structureMap[6][6] = 0; // Door (walkable)
-    this.structureMap[3][4] = 3; // Blacksmith Table
-    
-    // House 2: Baker cottage (bottom-right) - Wood floor
-    for (let y = 16; y <= 20; y++) {
-      for (let x = 18; x <= 24; x++) {
-        this.terrainMap[y][x] = 3; // Wood floor
-        if (y === 16 || y === 20 || x === 18 || x === 24) {
-          this.structureMap[y][x] = 1; // Walls
-        }
-      }
-    }
-    this.structureMap[16][21] = 0; // Door (walkable)
-    this.structureMap[18][22] = 3; // Baker Counter
-    this.structureMap[18][20] = 5; // Chest
   }
   
   initializePlayer() {
     this.player = {
       id: 'local_player',
       name: 'Player',
-      x: 10,             // cell coordinates
-      y: 13,
-      targetX: 10,       // target cell coordinates during interpolation
-      targetY: 13,
+      x: 32,             // Spawn player at center road coordinates
+      y: 34,
+      targetX: 32,
+      targetY: 34,
       moving: false,
-      moveProgress: 0,   // 0 to 1
-      speed: 0.15,       // movement speed per tick
+      moveProgress: 0,
+      speed: 0.25,       // Speeds up movement transition tick (faster)
       color: '#00f0ff',
       facing: 'down',
       avatarType: 'human',
@@ -114,18 +164,17 @@ export class AmbientEngine {
   }
   
   initializeCitizens() {
-    // List of active citizens (initially mock static ones for Milestone 1 visualization)
-    // Milestone 3/4 will plug these directly to server socket updates.
     this.citizens = [
       {
         id: 'npc_alex',
         name: 'Alex (Blacksmith)',
-        x: 5,
-        y: 4,
-        targetX: 5,
-        targetY: 4,
+        x: 11,
+        y: 8,
+        targetX: 11,
+        targetY: 8,
         moving: false,
         moveProgress: 0,
+        speed: 0.25,
         color: '#ffb700',
         facing: 'down',
         job: 'Blacksmith',
@@ -137,12 +186,13 @@ export class AmbientEngine {
       {
         id: 'npc_sarah',
         name: 'Sarah (Baker)',
-        x: 21,
-        y: 18,
-        targetX: 21,
-        targetY: 18,
+        x: 49,
+        y: 42,
+        targetX: 49,
+        targetY: 42,
         moving: false,
         moveProgress: 0,
+        speed: 0.25,
         color: '#ff007f',
         facing: 'left',
         job: 'Baker',
@@ -154,12 +204,13 @@ export class AmbientEngine {
       {
         id: 'npc_ethan',
         name: 'Ethan (Mayor)',
-        x: 16,
-        y: 11,
-        targetX: 16,
-        targetY: 11,
+        x: 38,
+        y: 30,
+        targetX: 38,
+        targetY: 30,
         moving: false,
         moveProgress: 0,
+        speed: 0.25,
         color: '#aa3bff',
         facing: 'down',
         job: 'Mayor',
@@ -171,12 +222,13 @@ export class AmbientEngine {
       {
         id: 'npc_lily',
         name: 'Lily (Teacher)',
-        x: 12,
-        y: 8,
-        targetX: 12,
-        targetY: 8,
+        x: 41,
+        y: 19,
+        targetX: 41,
+        targetY: 19,
         moving: false,
         moveProgress: 0,
+        speed: 0.25,
         color: '#39ff14',
         facing: 'left',
         job: 'Teacher',
@@ -188,12 +240,13 @@ export class AmbientEngine {
       {
         id: 'npc_noah',
         name: 'Noah (Farmer)',
-        x: 4,
-        y: 18,
-        targetX: 4,
-        targetY: 18,
+        x: 18,
+        y: 44,
+        targetX: 18,
+        targetY: 44,
         moving: false,
         moveProgress: 0,
+        speed: 0.25,
         color: '#ffb700',
         facing: 'right',
         job: 'Farmer',
@@ -205,12 +258,13 @@ export class AmbientEngine {
       {
         id: 'npc_emma',
         name: 'Emma (Doctor)',
-        x: 25,
-        y: 10,
-        targetX: 25,
-        targetY: 10,
+        x: 50,
+        y: 8,
+        targetX: 50,
+        targetY: 8,
         moving: false,
         moveProgress: 0,
+        speed: 0.25,
         color: '#e2e8f0',
         facing: 'down',
         job: 'Doctor',
@@ -472,9 +526,15 @@ export class AmbientEngine {
     ctx.scale(this.scale, this.scale);
     ctx.translate(-this.camera.x, -this.camera.y);
     
-    // Render Layer 1: Terrain
-    for (let y = 0; y < this.mapHeight; y++) {
-      for (let x = 0; x < this.mapWidth; x++) {
+    // Calculate visible tile bounds (viewport culling for fast render)
+    const startX = Math.max(0, Math.floor(this.camera.x / this.tileSize));
+    const endX = Math.min(this.mapWidth - 1, Math.ceil((this.camera.x + this.canvas.width / this.scale) / this.tileSize));
+    const startY = Math.max(0, Math.floor(this.camera.y / this.tileSize));
+    const endY = Math.min(this.mapHeight - 1, Math.ceil((this.camera.y + this.canvas.height / this.scale) / this.tileSize));
+
+    // Render Layer 1: Terrain (visible bounds only)
+    for (let y = startY; y <= endY; y++) {
+      for (let x = startX; x <= endX; x++) {
         const tx = x * this.tileSize;
         const ty = y * this.tileSize;
         const type = this.terrainMap[y][x];
@@ -483,63 +543,30 @@ export class AmbientEngine {
           case 0: // Grass
             ctx.fillStyle = '#1e331c';
             ctx.fillRect(tx, ty, this.tileSize, this.tileSize);
-            // Draw some mini grass blades procedurally
-            ctx.strokeStyle = '#2b4d28';
-            ctx.lineWidth = 1;
-            if ((x + y) % 3 === 0) {
-              ctx.beginPath();
-              ctx.moveTo(tx + 8, ty + 12);
-              ctx.lineTo(tx + 10, ty + 6);
-              ctx.lineTo(tx + 12, ty + 12);
-              ctx.stroke();
-            }
-            if ((x * 2 + y) % 5 === 0) {
-              ctx.beginPath();
-              ctx.moveTo(tx + 20, ty + 24);
-              ctx.lineTo(tx + 22, ty + 18);
-              ctx.lineTo(tx + 24, ty + 24);
-              ctx.stroke();
-            }
             break;
           case 1: // Road/Path
             ctx.fillStyle = '#2d2a26';
             ctx.fillRect(tx, ty, this.tileSize, this.tileSize);
-            ctx.fillStyle = '#37322d';
-            // Subtle pebbles
-            if ((x * y) % 4 === 1) {
-              ctx.fillRect(tx + 4, ty + 6, 2, 2);
-              ctx.fillRect(tx + 16, ty + 20, 2, 2);
-            }
             break;
           case 2: // Water
-            // Animated wave color styling
-            const wave = Math.sin(this.time + x + y) * 2;
-            ctx.fillStyle = y % 2 === 0 ? '#0f2942' : '#0c2238';
+            ctx.fillStyle = '#0f2942';
             ctx.fillRect(tx, ty, this.tileSize, this.tileSize);
-            ctx.fillStyle = '#19436b';
-            ctx.fillRect(tx + 4 + wave, ty + 12, 10, 1);
             break;
           case 3: // Wood Floor
             ctx.fillStyle = '#3d2516';
             ctx.fillRect(tx, ty, this.tileSize, this.tileSize);
-            ctx.strokeStyle = '#2b1a0f';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(tx, ty, this.tileSize, this.tileSize);
             break;
           case 4: // Stone Floor
             ctx.fillStyle = '#2c2e35';
             ctx.fillRect(tx, ty, this.tileSize, this.tileSize);
-            ctx.strokeStyle = '#1e1f24';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(tx, ty, this.tileSize, this.tileSize);
             break;
         }
       }
     }
     
-    // Render Layer 2: Structures
-    for (let y = 0; y < this.mapHeight; y++) {
-      for (let x = 0; x < this.mapWidth; x++) {
+    // Render Layer 2: Structures (visible bounds only)
+    for (let y = startY; y <= endY; y++) {
+      for (let x = startX; x <= endX; x++) {
         const tx = x * this.tileSize;
         const ty = y * this.tileSize;
         const struct = this.structureMap[y][x];
@@ -548,36 +575,24 @@ export class AmbientEngine {
           case 1: // Wall/Brick
             ctx.fillStyle = '#473d38';
             ctx.fillRect(tx, ty, this.tileSize, this.tileSize);
-            ctx.fillStyle = '#574c46';
-            ctx.fillRect(tx + 2, ty + 2, this.tileSize - 4, this.tileSize - 4);
             ctx.strokeStyle = '#2d2522';
             ctx.strokeRect(tx, ty, this.tileSize, this.tileSize);
             break;
-          case 2: // Tree
-            // Trunk
+          case 2: // Tree (simple flat circle tree for speed)
             ctx.fillStyle = '#4c3218';
-            ctx.fillRect(tx + 12, ty + 18, 8, 14);
-            // Foliage
+            ctx.fillRect(tx + 13, ty + 20, 6, 12);
             ctx.fillStyle = '#1c4515';
             ctx.beginPath();
-            ctx.arc(tx + 16, ty + 12, 14, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = '#285e20';
-            ctx.beginPath();
-            ctx.arc(tx + 14, ty + 10, 10, 0, Math.PI * 2);
+            ctx.arc(tx + 16, ty + 12, 12, 0, Math.PI * 2);
             ctx.fill();
             break;
           case 3: // Table
             ctx.fillStyle = '#613b1d';
             ctx.fillRect(tx + 2, ty + 4, this.tileSize - 4, this.tileSize - 8);
-            ctx.fillStyle = '#804f27';
-            ctx.fillRect(tx + 4, ty + 6, this.tileSize - 8, this.tileSize - 12);
             break;
-          case 5: // Chest
+          case 5: // Chest / Crop
             ctx.fillStyle = '#7a5015';
             ctx.fillRect(tx + 6, ty + 8, 20, 16);
-            ctx.fillStyle = '#ffcc00';
-            ctx.fillRect(tx + 14, ty + 14, 4, 4); // lock
             break;
         }
       }
