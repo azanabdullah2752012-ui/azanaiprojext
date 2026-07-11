@@ -22,7 +22,9 @@ export function NPCChatModal({ npc, onClose, onSendMessage, playerMoney, playerI
       sells: [
         { name: 'Iron Ore', price: 10 },
         { name: 'Hammer', price: 30 },
-        { name: 'Hoe', price: 20 }
+        { name: 'Hoe', price: 20 },
+        { name: 'Broadsword', price: 50 },
+        { name: 'Iron Plate Armor', price: 60 }
       ],
       buys: [
         { name: 'Wood', price: 5 },

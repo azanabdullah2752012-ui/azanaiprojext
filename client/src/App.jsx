@@ -7,6 +7,7 @@ import { AIConsole } from './components/AIConsole';
 import { ChatBox } from './components/ChatBox';
 import { NPCChatModal } from './components/NPCChatModal';
 import { ChestModal } from './components/ChestModal';
+import { QuestBoardModal } from './components/QuestBoardModal';
 
 export default function App() {
   const canvasRef = useRef(null);
@@ -38,6 +39,17 @@ export default function App() {
   const [nearCrop, setNearCrop] = useState(null);
   const [editorMode, setEditorMode] = useState(false);
   const [selectedBrush, setSelectedBrush] = useState({ type: 'terrain', id: 0 });
+  const [playerHP, setPlayerHP] = useState(100);
+  const [playerMaxHP, setPlayerMaxHP] = useState(100);
+  const [playerLevel, setPlayerLevel] = useState(1);
+  const [playerXP, setPlayerXP] = useState(0);
+  const [playerATK, setPlayerATK] = useState(10);
+  const [playerDEF, setPlayerDEF] = useState(2);
+  const [equippedWeapon, setEquippedWeapon] = useState(null);
+  const [equippedArmor, setEquippedArmor] = useState(null);
+  const [activeQuests, setActiveQuests] = useState([]);
+  const [showQuestBoard, setShowQuestBoard] = useState(false);
+  const [nearQuestBoard, setNearQuestBoard] = useState(false);
   
   // Chat logs
   const [messages, setMessages] = useState([
@@ -100,6 +112,34 @@ export default function App() {
     // Update player parameters in engine
     engine.player.name = username;
     engine.player.color = selectedColor;
+    engine.player.def = playerDEF;
+
+    engine.onPlayerDamage = (damage) => {
+      setPlayerHP(prev => {
+        const nextHP = Math.max(0, prev - damage);
+        if (nextHP <= 0) {
+          engine.player.x = 32;
+          engine.player.y = 34;
+          engine.player.targetX = 32;
+          engine.player.targetY = 34;
+          engine.player.moving = false;
+          engine.player.moveProgress = 0;
+          
+          setMessages(prevMsgs => [
+            ...prevMsgs,
+            {
+              sender: 'System',
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              text: `💀 You died! Respawned at Center Plaza. Lost 5 Coins.`,
+              type: 'system'
+            }
+          ]);
+          setPlayerMoney(coins => Math.max(0, coins - 5));
+          return 50; 
+        }
+        return nextHP;
+      });
+    };
     
     // Emit join signal
     socket.emit('join-world', {
@@ -255,10 +295,69 @@ export default function App() {
         }
       }
       setNearCrop(currentNearCrop);
+
+      // Find proximity to Quest Board
+      const distQuest = Math.sqrt(Math.pow(px - 31, 2) + Math.pow(py - 30, 2));
+      const closeToQuestBoard = distQuest <= 1.5;
+      setNearQuestBoard(closeToQuestBoard);
+
+      // Spacebar attack sword swings
+      if (input.consumeKey(' ')) {
+        let tx = px;
+        let ty = py;
+        if (engine.player.facing === 'up') ty--;
+        else if (engine.player.facing === 'down') ty++;
+        else if (engine.player.facing === 'left') tx--;
+        else if (engine.player.facing === 'right') tx++;
+
+        engine.slashAnimations.push({ x: tx, y: ty, timer: 12 });
+
+        engine.monsters.forEach((m, idx) => {
+          if (m.x === tx && m.y === ty) {
+            const damage = Math.max(1, playerATKRef.current - m.def);
+            m.hp -= damage;
+            engine.damagePopups.push({ x: m.x, y: m.y, text: `-${damage} HP 💥`, timer: 30, color: '#e74c3c' });
+
+            if (m.hp <= 0) {
+              engine.monsters.splice(idx, 1);
+              
+              addXP(m.xpReward);
+              setPlayerMoney(c => c + m.coinReward);
+
+              const timeStr = formatTime(simTimeRef.current.hour, simTimeRef.current.minute);
+              setMessages(prev => [
+                ...prev,
+                {
+                  sender: 'System',
+                  time: timeStr,
+                  text: `💥 Defeated ${m.name}! Gained +${m.xpReward} XP and +${m.coinReward} Coins.`,
+                  type: 'system'
+                }
+              ]);
+
+              setActiveQuests(prevQuests => {
+                return prevQuests.map(q => {
+                  if (q.status === 'active' && q.targetType === m.type) {
+                    const newCurrent = Math.min(q.target, q.current + 1);
+                    return {
+                      ...q,
+                      current: newCurrent,
+                      status: newCurrent >= q.target ? 'ready' : 'active'
+                    };
+                  }
+                  return q;
+                });
+              });
+            }
+          }
+        });
+      }
       
       // Check E key press interaction
       if (input.consumeKey('e')) {
-        if (currentNearCrop) {
+        if (closeToQuestBoard) {
+          setShowQuestBoard(true);
+        } else if (currentNearCrop) {
           const [cx, cy] = currentNearCrop.split(',').map(Number);
           engine.structureMap[cy][cx] = 0; // empty Layer 2
           delete engine.crops[currentNearCrop];
@@ -556,14 +655,26 @@ export default function App() {
     if (type === 'buy') {
       if (playerMoney < itemPrice) return;
       setPlayerMoney(prev => prev - itemPrice);
-      addOrStackItem(playerList, itemName);
+      
+      let equipMsg = "";
+      if (itemName === 'Broadsword') {
+        setEquippedWeapon('Broadsword');
+        setPlayerATK(25);
+        equipMsg = " ⚔️ Equipped Broadsword! ATK is now 25.";
+      } else if (itemName === 'Iron Plate Armor') {
+        setEquippedArmor('Iron Plate Armor');
+        setPlayerDEF(7);
+        equipMsg = " 🛡️ Equipped Iron Plate Armor! DEF is now 7.";
+      } else {
+        addOrStackItem(playerList, itemName);
+      }
       
       setMessages((prev) => [
         ...prev,
         {
           sender: 'System',
           time: timeStr,
-          text: `💰 You bought 1 ${itemName} for ${itemPrice} Coins.`,
+          text: `💰 You bought 1 ${itemName} for ${itemPrice} Coins.${equipMsg}`,
           type: 'system'
         }
       ]);
@@ -587,6 +698,114 @@ export default function App() {
 
     engine.player.inventory = playerList;
     setPlayerInventory(playerList);
+  };
+
+  const addXP = (amount) => {
+    setPlayerXP(prevXP => {
+      let newXP = prevXP + amount;
+      let reqXP = playerLevelRef.current * 100;
+      let newLevel = playerLevelRef.current;
+      let newMaxHP = playerMaxHP;
+      let newATK = playerATK;
+      
+      while (newXP >= reqXP) {
+        newXP -= reqXP;
+        newLevel += 1;
+        newMaxHP += 20;
+        newATK += 4;
+        reqXP = newLevel * 100;
+        
+        const engine = engineRef.current;
+        if (engine) {
+          engine.damagePopups.push({
+            x: engine.player.x,
+            y: engine.player.y,
+            text: 'LEVEL UP! ✨',
+            timer: 60,
+            color: '#f1c40f'
+          });
+        }
+      }
+      
+      if (newLevel !== playerLevelRef.current) {
+        setPlayerLevel(newLevel);
+        setPlayerMaxHP(newMaxHP);
+        setPlayerHP(newMaxHP); 
+        setPlayerATK(newATK);
+      }
+      return newXP;
+    });
+  };
+
+  const handleAcceptQuest = (quest) => {
+    setActiveQuests(prev => {
+      if (prev.some(q => q.id === quest.id)) return prev;
+      return [
+        ...prev,
+        {
+          id: quest.id,
+          title: quest.title,
+          targetType: quest.targetType,
+          current: 0,
+          target: quest.target,
+          rewardXP: quest.rewardXP,
+          rewardCoins: quest.rewardCoins,
+          status: 'active'
+        }
+      ];
+    });
+    const timeStr = formatTime(simTime.hour, simTime.minute);
+    setMessages(prev => [
+      ...prev,
+      {
+        sender: 'System',
+        time: timeStr,
+        text: `📜 Accepted Quest: ${quest.title}. Goal: ${quest.description}`,
+        type: 'system'
+      }
+    ]);
+  };
+
+  const handleCompleteQuest = (questId) => {
+    const active = activeQuests.find(q => q.id === questId);
+    if (!active) return;
+
+    if (active.targetType.startsWith('item_')) {
+      const itemName = active.targetType.replace('item_', '');
+      const engine = engineRef.current;
+      if (!engine) return;
+
+      const playerList = [...engine.player.inventory];
+      const itemIdx = playerList.findIndex(i => i.startsWith(itemName + ' x') || i === itemName);
+      if (itemIdx === -1) return;
+
+      const parts = playerList[itemIdx].split(' x');
+      const count = parseInt(parts[1] || '1', 10);
+      if (count < active.target) return; 
+
+      if (count > active.target) {
+        playerList[itemIdx] = `${itemName} x${count - active.target}`;
+      } else {
+        playerList.splice(itemIdx, 1);
+      }
+      engine.player.inventory = playerList;
+      setPlayerInventory(playerList);
+    }
+
+    addXP(active.rewardXP);
+    setPlayerMoney(prev => prev + active.rewardCoins);
+    setActiveQuests(prev => prev.filter(q => q.id !== questId));
+
+    const timeStr = formatTime(simTime.hour, simTime.minute);
+    setMessages(prev => [
+      ...prev,
+      {
+        sender: 'System',
+        time: timeStr,
+        text: `🎉 Quest Completed: ${active.title}! Gained +${active.rewardXP} XP and +${active.rewardCoins} Coins.`,
+        type: 'system'
+      }
+    ]);
   };
 
   const handleGridBuild = (x, y, itemName) => {
@@ -742,6 +961,18 @@ export default function App() {
   const activeBuildItemRef = useRef(null);
   activeBuildItemRef.current = activeBuildItem;
 
+  const playerLevelRef = useRef(1);
+  playerLevelRef.current = playerLevel;
+
+  const playerHPRef = useRef(100);
+  playerHPRef.current = playerHP;
+
+  const playerATKRef = useRef(10);
+  playerATKRef.current = playerATK;
+
+  const simTimeRef = useRef(null);
+  simTimeRef.current = simTime;
+
   const editorModeRef = useRef(false);
   editorModeRef.current = editorMode;
 
@@ -788,20 +1019,32 @@ export default function App() {
           )}
           <div className="stats-bar">
             <div className="stat-item">
-              <span className="stat-label">System Time</span>
+              <span className="stat-label">Time</span>
               <span className="stat-value">{formatTime(simTime.hour, simTime.minute)}</span>
             </div>
             <div className="stat-item">
-              <span className="stat-label">Energy</span>
-              <span className="stat-value" style={{ color: playerEnergy < 30 ? '#ff0055' : 'var(--accent-cyan)' }}>{playerEnergy}%</span>
+              <span className="stat-label">LVL</span>
+              <span className="stat-value" style={{ color: 'var(--accent-yellow)', fontWeight: 'bold' }}>{playerLevel}</span>
             </div>
             <div className="stat-item">
-              <span className="stat-label">Position</span>
-              <span className="stat-value">X: {playerCoords.x}, Y: {playerCoords.y}</span>
+              <span className="stat-label">HP</span>
+              <span className="stat-value" style={{ color: playerHP < 30 ? '#ff0055' : '#39ff14' }}>{playerHP}/{playerMaxHP}</span>
             </div>
             <div className="stat-item">
-              <span className="stat-label">Population</span>
-              <span className="stat-value">{populationCount} online</span>
+              <span className="stat-label">XP</span>
+              <span className="stat-value" style={{ color: 'var(--accent-cyan)' }}>{playerXP}/{playerLevel * 100}</span>
+            </div>
+            <div className="stat-item">
+              <span className="stat-label">ATK</span>
+              <span className="stat-value">{playerATK}</span>
+            </div>
+            <div className="stat-item">
+              <span className="stat-label">DEF</span>
+              <span className="stat-value">{playerDEF}</span>
+            </div>
+            <div className="stat-item">
+              <span className="stat-label">Money</span>
+              <span className="stat-value" style={{ color: 'var(--accent-yellow)' }}>{playerMoney}c</span>
             </div>
           </div>
         </header>
@@ -1048,6 +1291,28 @@ export default function App() {
             </div>
           )}
 
+          {joined && nearQuestBoard && !activeChest && !activeChatNPC && (
+            <div style={{
+              position: 'absolute',
+              top: '20px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: 'rgba(255, 183, 0, 0.95)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '6px',
+              padding: '6px 16px',
+              fontSize: '12px',
+              fontFamily: 'var(--font-mono)',
+              color: '#020205',
+              fontWeight: 'bold',
+              boxShadow: '0 0 10px rgba(255, 183, 0, 0.5)',
+              pointerEvents: 'none',
+              zIndex: 5
+            }}>
+              Press [E] to read Quest Bulletin Board
+            </div>
+          )}
+
           {joined && nearCrop && !activeChest && !activeChatNPC && (
             <div style={{
               position: 'absolute',
@@ -1145,6 +1410,16 @@ export default function App() {
             </button>
           </div>
         </div>
+
+      {showQuestBoard && (
+        <QuestBoardModal
+          onClose={() => setShowQuestBoard(false)}
+          activeQuests={activeQuests}
+          onAcceptQuest={handleAcceptQuest}
+          onCompleteQuest={handleCompleteQuest}
+          playerItems={playerInventory}
+        />
+      )}
 
         <div className="sidebar-content">
           {activeTab === 'inspector' ? (

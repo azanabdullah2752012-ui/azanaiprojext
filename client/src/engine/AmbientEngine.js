@@ -92,9 +92,15 @@ export class AmbientEngine {
     
     this.lastHour = -1;
     this.autonomousTalkTimer = 300;
+    this.monsters = [];
+    this.slashAnimations = [];
+    this.damagePopups = [];
+    this.onPlayerDamage = null;
+
     this.initializeMap();
     this.initializePlayer();
     this.initializeCitizens();
+    this.spawnMonsters();
     
     this.setupClickEvent();
   }
@@ -216,6 +222,8 @@ export class AmbientEngine {
         this.structureMap[ty][tx] = 2; // Tree
       }
     }
+
+    this.structureMap[30][31] = 9; // Quest Board Sign
   }
   
   initializePlayer() {
@@ -521,6 +529,20 @@ export class AmbientEngine {
     return [];
   }
 
+  spawnMonsters() {
+    this.monsters = [
+      { id: 'slime_1', name: 'Forest Slime', x: 15, y: 12, targetX: 15, targetY: 12, moving: false, moveProgress: 0, facing: 'down', hp: 30, maxHp: 30, atk: 5, def: 1, xpReward: 25, coinReward: 4, type: 'slime', attackCooldown: 0 },
+      { id: 'slime_2', name: 'Forest Slime', x: 18, y: 10, targetX: 18, targetY: 10, moving: false, moveProgress: 0, facing: 'down', hp: 30, maxHp: 30, atk: 5, def: 1, xpReward: 25, coinReward: 4, type: 'slime', attackCooldown: 0 },
+      { id: 'slime_3', name: 'Forest Slime', x: 16, y: 14, targetX: 16, targetY: 14, moving: false, moveProgress: 0, facing: 'down', hp: 30, maxHp: 30, atk: 5, def: 1, xpReward: 25, coinReward: 4, type: 'slime', attackCooldown: 0 },
+      { id: 'slime_4', name: 'Forest Slime', x: 52, y: 48, targetX: 52, targetY: 48, moving: false, moveProgress: 0, facing: 'down', hp: 30, maxHp: 30, atk: 5, def: 1, xpReward: 25, coinReward: 4, type: 'slime', attackCooldown: 0 },
+      { id: 'slime_5', name: 'Lake Slime', x: 54, y: 52, targetX: 54, targetY: 52, moving: false, moveProgress: 0, facing: 'down', hp: 30, maxHp: 30, atk: 5, def: 1, xpReward: 25, coinReward: 4, type: 'slime', attackCooldown: 0 },
+      
+      { id: 'boar_1', name: 'Forest Boar', x: 15, y: 50, targetX: 15, targetY: 50, moving: false, moveProgress: 0, facing: 'down', hp: 60, maxHp: 60, atk: 12, def: 3, xpReward: 50, coinReward: 10, type: 'boar', attackCooldown: 0 },
+      { id: 'boar_2', name: 'Forest Boar', x: 12, y: 48, targetX: 12, targetY: 48, moving: false, moveProgress: 0, facing: 'down', hp: 60, maxHp: 60, atk: 12, def: 3, xpReward: 50, coinReward: 10, type: 'boar', attackCooldown: 0 },
+      { id: 'boar_3', name: 'Tusked Boar', x: 55, y: 12, targetX: 55, targetY: 12, moving: false, moveProgress: 0, facing: 'down', hp: 60, maxHp: 60, atk: 12, def: 3, xpReward: 50, coinReward: 10, type: 'boar', attackCooldown: 0 }
+    ];
+  }
+
   runAutonomousEconomyTick() {
     const addOrStackItem = (npc, itemStr) => {
       const parts = itemStr.split(' x');
@@ -790,6 +812,86 @@ export class AmbientEngine {
     if (this.autonomousTalkTimer <= 0) {
       this.autonomousTalkTimer = 300;
       this.runAutonomousTalk();
+    }
+
+    // Update monsters position and AI
+    this.monsters.forEach(m => {
+      if (m.attackCooldown > 0) m.attackCooldown--;
+
+      if (m.moving) {
+        m.moveProgress += 0.04;
+        if (m.moveProgress >= 1) {
+          m.x = m.targetX;
+          m.y = m.targetY;
+          m.moving = false;
+          m.moveProgress = 0;
+        }
+      }
+
+      if (!m.moving) {
+        const px = this.player.x;
+        const py = this.player.y;
+        const dist = Math.sqrt(Math.pow(px - m.x, 2) + Math.pow(py - m.y, 2));
+
+        if (dist <= 1.2) {
+          if (m.attackCooldown <= 0) {
+            const damage = Math.max(1, m.atk - (this.player.def || 2));
+            if (this.onPlayerDamage) {
+              this.onPlayerDamage(damage);
+            }
+            this.damagePopups.push({
+              x: this.player.x,
+              y: this.player.y,
+              text: `-${damage} HP 🩸`,
+              timer: 35,
+              color: '#ff0055'
+            });
+            m.attackCooldown = 60;
+          }
+        } else if (dist <= 4) {
+          let dx = Math.sign(px - m.x);
+          let dy = Math.sign(py - m.y);
+          
+          let tx = m.x + dx;
+          let ty = m.y;
+          if (!this.isTileWalkable(tx, ty)) {
+            tx = m.x;
+            ty = m.y + dy;
+          }
+          
+          if (this.isTileWalkable(tx, ty) && (tx !== px || ty !== py)) {
+            m.targetX = tx;
+            m.targetY = ty;
+            m.moving = true;
+            m.moveProgress = 0;
+            if (dx > 0) m.facing = 'right';
+            else if (dx < 0) m.facing = 'left';
+            else if (dy > 0) m.facing = 'down';
+            else if (dy < 0) m.facing = 'up';
+          }
+        } else {
+          if (Math.random() < 0.015) {
+            const dirs = [
+              { x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }
+            ];
+            const dir = dirs[Math.floor(Math.random() * dirs.length)];
+            const tx = m.x + dir.x;
+            const ty = m.y + dir.y;
+            if (this.isTileWalkable(tx, ty) && (tx !== px || ty !== py)) {
+              m.targetX = tx;
+              m.targetY = ty;
+              m.moving = true;
+              m.moveProgress = 0;
+            }
+          }
+        }
+      }
+    });
+
+    if (this.monsters.length < 4) {
+      if (Math.random() < 0.005) {
+        this.spawnMonsters();
+      }
     }
 
     // 1. Update citizen position interpolation & step execution
@@ -1075,6 +1177,16 @@ export class AmbientEngine {
             ctx.fillRect(tx + 14, ty + 4, 7, 4);
             ctx.fillRect(tx + 22, ty + 8, 7, 4);
             break;
+          case 9: // Quest bulletin board sign
+            ctx.fillStyle = '#6e473b';
+            ctx.fillRect(tx + 14, ty + 16, 4, 16); 
+            ctx.fillStyle = '#bfa58f';
+            ctx.fillRect(tx + 6, ty + 4, 20, 12); 
+            ctx.strokeStyle = '#3d2516';
+            ctx.strokeRect(tx + 6, ty + 4, 20, 12);
+            ctx.fillStyle = '#f1c40f'; 
+            ctx.fillRect(tx + 10, ty + 6, 12, 8);
+            break;
         }
       }
     }
@@ -1089,6 +1201,75 @@ export class AmbientEngine {
     
     // Render Local Player
     this.drawCharacter(this.player);
+
+    // Render Monsters
+    this.monsters.forEach(m => {
+      const mx = (m.x + (m.targetX - m.x) * m.moveProgress) * this.tileSize;
+      const my = (m.y + (m.targetY - m.y) * m.moveProgress) * this.tileSize;
+      
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.beginPath();
+      ctx.ellipse(mx + 16, my + 26, 8, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (m.type === 'slime') {
+        ctx.fillStyle = '#39ff14';
+        ctx.strokeStyle = '#27ae60';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(mx + 16, my + 20, 8, Math.PI, 0); 
+        ctx.lineTo(mx + 26, my + 24);
+        ctx.lineTo(mx + 6, my + 24);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(mx + 12, my + 17, 2, 2);
+        ctx.fillRect(mx + 18, my + 17, 2, 2);
+      } else if (m.type === 'boar') {
+        ctx.fillStyle = '#d35400';
+        ctx.fillRect(mx + 8, my + 12, 16, 12);
+        ctx.fillStyle = '#e67e22';
+        ctx.fillRect(mx + 22, my + 10, 4, 4); 
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(mx + 24, my + 18, 2, 4); 
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(mx + 18, my + 12, 2, 2); 
+      }
+
+      if (m.hp < m.maxHp) {
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(mx + 4, my + 2, 24, 3);
+        const hpPct = m.hp / m.maxHp;
+        ctx.fillStyle = '#ff0055';
+        ctx.fillRect(mx + 4, my + 2, 24 * hpPct, 3);
+      }
+    });
+
+    // Render Slash Arc VFX
+    this.slashAnimations.forEach((s, idx) => {
+      const sx = s.x * this.tileSize;
+      const sy = s.y * this.tileSize;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(sx + 16, sy + 16, 10, 0.25 * Math.PI, 1.25 * Math.PI);
+      ctx.stroke();
+      s.timer--;
+      if (s.timer <= 0) this.slashAnimations.splice(idx, 1);
+    });
+
+    // Render Damage Popups
+    this.damagePopups.forEach((p, idx) => {
+      const px = p.x * this.tileSize;
+      const py = p.y * this.tileSize - (30 - p.timer) * 0.5;
+      ctx.fillStyle = p.color;
+      ctx.font = 'bold 9px monospace';
+      ctx.fillText(p.text, px + 16 - ctx.measureText(p.text).width / 2, py - 4);
+      p.timer--;
+      if (p.timer <= 0) this.damagePopups.splice(idx, 1);
+    });
     
     // Render Speech bubbles (in a separate pass so they draw on top of everything)
     this.drawChatBubble(this.player);
