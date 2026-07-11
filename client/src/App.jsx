@@ -36,6 +36,8 @@ export default function App() {
   const [activeBuildItem, setActiveBuildItem] = useState(null);
   const [playerMoney, setPlayerMoney] = useState(50);
   const [nearCrop, setNearCrop] = useState(null);
+  const [editorMode, setEditorMode] = useState(false);
+  const [selectedBrush, setSelectedBrush] = useState({ type: 'terrain', id: 0 });
   
   // Chat logs
   const [messages, setMessages] = useState([
@@ -147,6 +149,31 @@ export default function App() {
           engine.player.chatTimer = 180;
         } else {
           engine.showOtherPlayerChat(msg.id, msg.text);
+        }
+      }
+    });
+
+    socket.on('tile-painted', (data) => {
+      if (engine) {
+        if (data.brushType === 'terrain') {
+          engine.terrainMap[data.y][data.x] = data.brushId;
+        } else if (data.brushType === 'structure') {
+          engine.structureMap[data.y][data.x] = data.brushId;
+          if (data.brushId === 5) {
+            engine.crops[`${data.x},${data.y}`] = { stage: 1, timer: 180 };
+          } else {
+            delete engine.crops[`${data.x},${data.y}`];
+          }
+        }
+      }
+    });
+
+    socket.on('citizen-updated', (data) => {
+      if (engine) {
+        const npc = engine.citizens.find(c => c.id === data.id);
+        if (npc) {
+          npc.name = data.name;
+          npc.job = data.job;
         }
       }
     });
@@ -653,15 +680,73 @@ export default function App() {
     }
   };
 
+  const handleUpdateCitizen = (npcId, newConfig) => {
+    const engine = engineRef.current;
+    if (!npcId || !engine) return;
+
+    const npc = engine.citizens.find(c => c.id === npcId);
+    if (npc) {
+      npc.name = newConfig.name;
+      npc.job = newConfig.job;
+
+      if (socketRef.current) {
+        socketRef.current.emit('update-citizen', { id: npcId, name: newConfig.name, job: newConfig.job });
+      }
+
+      setSelectedCitizen(prev => prev ? { ...prev, name: newConfig.name, job: newConfig.job } : null);
+
+      const timeStr = formatTime(simTime.hour, simTime.minute);
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: 'System',
+          time: timeStr,
+          text: `🛠️ Configured Citizen ${newConfig.name} profile settings successfully.`,
+          type: 'system'
+        }
+      ]);
+    }
+  };
+
+  const handleGridClick = (x, y) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+
+    if (editorModeRef.current) {
+      const brush = selectedBrushRef.current;
+      if (brush.type === 'terrain') {
+        engine.terrainMap[y][x] = brush.id;
+      } else if (brush.type === 'structure') {
+        engine.structureMap[y][x] = brush.id;
+        if (brush.id === 5) {
+          engine.crops[`${x},${y}`] = { stage: 1, timer: 180 };
+        } else {
+          delete engine.crops[`${x},${y}`];
+        }
+      }
+      if (socketRef.current) {
+        socketRef.current.emit('paint-tile', { x, y, brushType: brush.type, brushId: brush.id });
+      }
+    } else {
+      if (activeBuildItemRef.current) {
+        handleGridBuild(x, y, activeBuildItemRef.current);
+      }
+    }
+  };
+
   const triggerGridBuildRef = useRef(null);
   triggerGridBuildRef.current = (x, y) => {
-    if (activeBuildItemRef.current) {
-      handleGridBuild(x, y, activeBuildItemRef.current);
-    }
+    handleGridClick(x, y);
   };
 
   const activeBuildItemRef = useRef(null);
   activeBuildItemRef.current = activeBuildItem;
+
+  const editorModeRef = useRef(false);
+  editorModeRef.current = editorMode;
+
+  const selectedBrushRef = useRef(null);
+  selectedBrushRef.current = selectedBrush;
   
   const formatTime = (h, m) => {
     const ampm = h >= 12 ? 'PM' : 'AM';
@@ -679,6 +764,28 @@ export default function App() {
             <h1 className="main-title">CivilOS Simulator</h1>
             <span className="subtitle">Ambient Engine Canvas • v0.2.0 (Multiplayer)</span>
           </div>
+          {joined && (
+            <button
+              onClick={() => setEditorMode(!editorMode)}
+              style={{
+                background: editorMode ? 'rgba(255, 183, 0, 0.15)' : 'rgba(0, 240, 255, 0.05)',
+                border: `1px solid ${editorMode ? 'var(--accent-yellow)' : 'var(--glass-border)'}`,
+                color: editorMode ? 'var(--accent-yellow)' : 'var(--text-muted)',
+                borderRadius: 'var(--border-radius-sm)',
+                padding: '8px 16px',
+                fontSize: '11px',
+                fontFamily: 'var(--font-mono)',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                marginLeft: '20px',
+                transition: 'all 0.3s ease',
+                outline: 'none',
+                zIndex: 6
+              }}
+            >
+              🛠️ {editorMode ? 'EDITOR: ACTIVE' : 'WORLD EDITOR'}
+            </button>
+          )}
           <div className="stats-bar">
             <div className="stat-item">
               <span className="stat-label">System Time</span>
@@ -853,6 +960,94 @@ export default function App() {
             </div>
           )}
 
+          {joined && editorMode && (
+            <div style={{
+              position: 'absolute',
+              top: '80px',
+              left: '20px',
+              background: 'var(--glass-bg)',
+              border: '1px solid var(--glass-border)',
+              borderRadius: 'var(--border-radius-md)',
+              padding: '16px',
+              width: '160px',
+              backdropFilter: 'blur(20px)',
+              boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              zIndex: 10
+            }}>
+              <h4 style={{ color: 'var(--accent-yellow)', fontSize: '11px', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: 0 }}>
+                Terrain Brushes
+              </h4>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
+                {[
+                  { id: 0, label: 'Grass', color: '#1e331c' },
+                  { id: 1, label: 'Road', color: '#2d2a26' },
+                  { id: 2, label: 'Water', color: '#0f2942' },
+                  { id: 3, label: 'Wood', color: '#3d2516' },
+                  { id: 4, label: 'Stone', color: '#2c2e35' }
+                ].map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => setSelectedBrush({ type: 'terrain', id: item.id })}
+                    style={{
+                      background: item.color,
+                      border: selectedBrush.type === 'terrain' && selectedBrush.id === item.id 
+                        ? '2px solid var(--accent-cyan)' 
+                        : '1px solid var(--glass-border)',
+                      borderRadius: '4px',
+                      height: '30px',
+                      fontSize: '9px',
+                      color: '#fff',
+                      fontFamily: 'var(--font-mono)',
+                      cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    }}
+                    title={item.label}
+                  >
+                    {item.label[0]}
+                  </button>
+                ))}
+              </div>
+
+              <h4 style={{ color: 'var(--accent-yellow)', fontSize: '11px', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '8px', margin: 0 }}>
+                Structure Brushes
+              </h4>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
+                {[
+                  { id: 0, label: 'Erase', emoji: '🧽' },
+                  { id: 1, label: 'Wall', emoji: '🧱' },
+                  { id: 2, label: 'Tree', emoji: '🌲' },
+                  { id: 3, label: 'Table', emoji: '🪑' },
+                  { id: 5, label: 'Chest', emoji: '📦' }
+                ].map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => setSelectedBrush({ type: 'structure', id: item.id })}
+                    style={{
+                      background: selectedBrush.type === 'structure' && selectedBrush.id === item.id 
+                        ? 'rgba(0, 240, 255, 0.15)' 
+                        : 'rgba(0,0,0,0.2)',
+                      border: selectedBrush.type === 'structure' && selectedBrush.id === item.id 
+                        ? '2px solid var(--accent-cyan)' 
+                        : '1px solid var(--glass-border)',
+                      borderRadius: '4px',
+                      height: '34px',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'
+                    }}
+                    title={item.label}
+                  >
+                    <span>{item.emoji}</span>
+                    <span style={{ fontSize: '7px', color: 'var(--text-muted)' }}>{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {joined && nearCrop && !activeChest && !activeChatNPC && (
             <div style={{
               position: 'absolute',
@@ -960,6 +1155,8 @@ export default function App() {
                   : selectedCitizen
               } 
               onUseItem={handleUseItem} 
+              editorMode={editorMode}
+              onUpdateCitizen={handleUpdateCitizen}
             />
           ) : (
             <ChatBox messages={messages} onSendMessage={handleSendMessage} />

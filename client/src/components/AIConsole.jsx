@@ -1,6 +1,16 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
-export function AIConsole({ selectedCitizen, onUseItem }) {
+export function AIConsole({ selectedCitizen, onUseItem, editorMode, onUpdateCitizen }) {
+  const [editName, setEditName] = useState('');
+  const [editJob, setEditJob] = useState('');
+
+  useEffect(() => {
+    if (selectedCitizen) {
+      setEditName(selectedCitizen.name || '');
+      setEditJob(selectedCitizen.job || 'Citizen');
+    }
+  }, [selectedCitizen]);
+
   if (!selectedCitizen) {
     return (
       <div className="empty-inspector">
@@ -11,22 +21,87 @@ export function AIConsole({ selectedCitizen, onUseItem }) {
     );
   }
 
-  // Check if it's the player
   const isPlayer = selectedCitizen.id === 'local_player';
 
   return (
     <div className="ai-console-panel">
       <div className="inspector-card">
         <div className="inspector-header">
-          <div>
-            <h3 className="inspector-name" style={{ color: selectedCitizen.color }}>
-              {selectedCitizen.name}
-            </h3>
-            <span className="inspector-job">{selectedCitizen.job || 'Citizen'}</span>
-          </div>
-          <span className={`inspector-status-badge ${selectedCitizen.status === 'sleeping' ? 'status-sleeping' : 'status-active'}`}>
-            {selectedCitizen.status || 'Active'}
-          </span>
+          {editorMode && !isPlayer ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+              <span className="section-label" style={{ marginBottom: 0 }}>Configure Citizen</span>
+              <input 
+                type="text" 
+                value={editName} 
+                onChange={(e) => setEditName(e.target.value)} 
+                style={{
+                  background: 'var(--bg-primary)',
+                  border: '1px solid var(--glass-border)',
+                  color: 'var(--text-main)',
+                  borderRadius: '4px',
+                  padding: '6px 10px',
+                  fontSize: '13px',
+                  outline: 'none',
+                  fontFamily: 'var(--font-sans)',
+                  width: '90%'
+                }}
+                placeholder="Citizen Name"
+              />
+              <select
+                value={editJob}
+                onChange={(e) => setEditJob(e.target.value)}
+                style={{
+                  background: 'var(--bg-primary)',
+                  border: '1px solid var(--glass-border)',
+                  color: 'var(--text-main)',
+                  borderRadius: '4px',
+                  padding: '6px 10px',
+                  fontSize: '13px',
+                  outline: 'none',
+                  fontFamily: 'var(--font-sans)',
+                  width: '90%'
+                }}
+              >
+                <option value="Blacksmith">Blacksmith</option>
+                <option value="Baker">Baker</option>
+                <option value="Mayor">Mayor</option>
+                <option value="Teacher">Teacher</option>
+                <option value="Farmer">Farmer</option>
+                <option value="Doctor">Doctor</option>
+                <option value="Villager">Villager</option>
+              </select>
+              <button
+                onClick={() => onUpdateCitizen(selectedCitizen.id, { name: editName, job: editJob })}
+                style={{
+                  background: 'rgba(0, 240, 255, 0.1)',
+                  border: '1px solid var(--accent-cyan)',
+                  color: 'var(--accent-cyan)',
+                  borderRadius: '4px',
+                  padding: '6px',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  fontFamily: 'var(--font-mono)',
+                  fontWeight: 'bold',
+                  marginTop: '4px',
+                  width: '90%'
+                }}
+              >
+                SAVE CITIZEN CONFIG
+              </button>
+            </div>
+          ) : (
+            <>
+              <div>
+                <h3 className="inspector-name" style={{ color: selectedCitizen.color }}>
+                  {selectedCitizen.name}
+                </h3>
+                <span className="inspector-job">{selectedCitizen.job || 'Citizen'}</span>
+              </div>
+              <span className={`inspector-status-badge ${selectedCitizen.status === 'sleeping' ? 'status-sleeping' : 'status-active'}`}>
+                {selectedCitizen.status || 'Active'}
+              </span>
+            </>
+          )}
         </div>
 
         {/* Dynamic Stats Grid */}

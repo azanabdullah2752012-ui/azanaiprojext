@@ -102,6 +102,21 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Collaborate Paint Tile trigger
+  socket.on('paint-tile', (tileData) => {
+    socket.broadcast.emit('tile-painted', tileData);
+  });
+
+  // Update NPC profile config trigger
+  socket.on('update-citizen', (citData) => {
+    if (npcProfiles[citData.id]) {
+      npcProfiles[citData.id].name = citData.name;
+      npcProfiles[citData.id].job = citData.job;
+      console.log(`[Socket] Citizen Profile Configuration updated: ${citData.id} -> ${citData.name} (${citData.job})`);
+      socket.broadcast.emit('citizen-updated', citData);
+    }
+  });
+
   // Disconnection cleanup
   socket.on('disconnect', () => {
     const player = activePlayers[socket.id];
