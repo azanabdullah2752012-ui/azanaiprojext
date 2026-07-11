@@ -34,6 +34,8 @@ export default function App() {
   const [populationCount, setPopulationCount] = useState(6);
   const [playerEnergy, setPlayerEnergy] = useState(100);
   const [activeBuildItem, setActiveBuildItem] = useState(null);
+  const [playerMoney, setPlayerMoney] = useState(50);
+  const [nearCrop, setNearCrop] = useState(null);
   
   // Chat logs
   const [messages, setMessages] = useState([
@@ -211,10 +213,62 @@ export default function App() {
         }
       }
       setNearChest(currentNearChest);
+
+      // Find nearest fully grown crop
+      let currentNearCrop = null;
+      for (const coords in engine.crops) {
+        const crop = engine.crops[coords];
+        if (crop.stage === 3) {
+          const [cx, cy] = coords.split(',').map(Number);
+          const dist = Math.sqrt(Math.pow(px - cx, 2) + Math.pow(py - cy, 2));
+          if (dist <= 1.5) {
+            currentNearCrop = coords;
+            break;
+          }
+        }
+      }
+      setNearCrop(currentNearCrop);
       
       // Check E key press interaction
       if (input.consumeKey('e')) {
-        if (currentNearChest) {
+        if (currentNearCrop) {
+          const [cx, cy] = currentNearCrop.split(',').map(Number);
+          engine.structureMap[cy][cx] = 0; // empty Layer 2
+          delete engine.crops[currentNearCrop];
+          setNearCrop(null);
+
+          const playerList = [...engine.player.inventory];
+          const addOrStackItem = (list, itemStr) => {
+            const parts = itemStr.split(' x');
+            const name = parts[0];
+            const count = parseInt(parts[1] || '1', 10);
+            const existingIdx = list.findIndex(i => i.startsWith(name + ' x') || i === name);
+            if (existingIdx !== -1) {
+              const existingParts = list[existingIdx].split(' x');
+              const existingCount = parseInt(existingParts[1] || '1', 10);
+              list[existingIdx] = `${name} x${existingCount + count}`;
+            } else {
+              list.push(itemStr);
+            }
+          };
+
+          addOrStackItem(playerList, 'Wheat x2');
+          addOrStackItem(playerList, 'Wheat Seed x1');
+
+          engine.player.inventory = playerList;
+          setPlayerInventory(playerList);
+
+          const timeStr = formatTime(simTime.hour, simTime.minute);
+          setMessages((prev) => [
+            ...prev,
+            {
+              sender: 'System',
+              time: timeStr,
+              text: `🌾 You harvested golden wheat! Gained: Wheat x2 and Wheat Seed x1.`,
+              type: 'system'
+            }
+          ]);
+        } else if (currentNearChest) {
           setActiveChest(currentNearChest);
         } else if (engine.citizens.length > 0) {
           let target = null;
@@ -438,6 +492,76 @@ export default function App() {
     }
   };
 
+  const handleTrade = (type, itemName, itemPrice) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+
+    const timeStr = formatTime(simTime.hour, simTime.minute);
+    const playerList = [...engine.player.inventory];
+
+    const addOrStackItem = (list, itemStr) => {
+      const parts = itemStr.split(' x');
+      const name = parts[0];
+      const count = parseInt(parts[1] || '1', 10);
+      const existingIdx = list.findIndex(i => i.startsWith(name + ' x') || i === name);
+      if (existingIdx !== -1) {
+        const existingParts = list[existingIdx].split(' x');
+        const existingCount = parseInt(existingParts[1] || '1', 10);
+        list[existingIdx] = `${name} x${existingCount + count}`;
+      } else {
+        list.push(itemStr);
+      }
+    };
+
+    const removeItem = (list, itemIndex) => {
+      const itemStr = list[itemIndex];
+      const parts = itemStr.split(' x');
+      const name = parts[0];
+      const count = parseInt(parts[1] || '1', 10);
+      if (count > 1) {
+        list[itemIndex] = `${name} x${count - 1}`;
+      } else {
+        list.splice(itemIndex, 1);
+      }
+      return `${name} x1`;
+    };
+
+    if (type === 'buy') {
+      if (playerMoney < itemPrice) return;
+      setPlayerMoney(prev => prev - itemPrice);
+      addOrStackItem(playerList, itemName);
+      
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: 'System',
+          time: timeStr,
+          text: `💰 You bought 1 ${itemName} for ${itemPrice} Coins.`,
+          type: 'system'
+        }
+      ]);
+    } else if (type === 'sell') {
+      const itemIdx = playerList.findIndex(i => i.startsWith(itemName + ' x') || i === itemName);
+      if (itemIdx === -1) return;
+
+      removeItem(playerList, itemIdx);
+      setPlayerMoney(prev => prev + itemPrice);
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: 'System',
+          time: timeStr,
+          text: `💰 You sold 1 ${itemName} for ${itemPrice} Coins.`,
+          type: 'system'
+        }
+      ]);
+    }
+
+    engine.player.inventory = playerList;
+    setPlayerInventory(playerList);
+  };
+
   const handleGridBuild = (x, y, itemName) => {
     const engine = engineRef.current;
     if (!engine) return;
@@ -503,6 +627,7 @@ export default function App() {
       engine.structureMap[y][x] = 3;
     } else if (itemName === 'Wheat Seed') {
       engine.structureMap[y][x] = 5;
+      engine.crops[`${x},${y}`] = { stage: 1, timer: 180 }; // track crop growth
     }
 
     engine.player.inventory = playerList;
@@ -728,6 +853,28 @@ export default function App() {
             </div>
           )}
 
+          {joined && nearCrop && !activeChest && !activeChatNPC && (
+            <div style={{
+              position: 'absolute',
+              top: '20px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: 'rgba(57, 255, 20, 0.95)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '6px',
+              padding: '6px 16px',
+              fontSize: '12px',
+              fontFamily: 'var(--font-mono)',
+              color: '#020205',
+              fontWeight: 'bold',
+              boxShadow: '0 0 10px rgba(57, 255, 20, 0.5)',
+              pointerEvents: 'none',
+              zIndex: 5
+            }}>
+              Press [E] to harvest Wheat crops
+            </div>
+          )}
+
           {joined && nearChest && !activeChest && !activeChatNPC && (
             <div style={{
               position: 'absolute',
@@ -754,6 +901,9 @@ export default function App() {
               npc={activeChatNPC}
               onClose={() => setActiveChatNPC(null)}
               onSendMessage={handleNPCChatBubble}
+              playerMoney={playerMoney}
+              playerItems={playerInventory}
+              onTrade={handleTrade}
             />
           )}
 
@@ -802,7 +952,14 @@ export default function App() {
 
         <div className="sidebar-content">
           {activeTab === 'inspector' ? (
-            <AIConsole selectedCitizen={selectedCitizen} onUseItem={handleUseItem} />
+            <AIConsole 
+              selectedCitizen={
+                selectedCitizen && selectedCitizen.id === 'local_player'
+                  ? { ...selectedCitizen, inventory: playerInventory, money: playerMoney }
+                  : selectedCitizen
+              } 
+              onUseItem={handleUseItem} 
+            />
           ) : (
             <ChatBox messages={messages} onSendMessage={handleSendMessage} />
           )}

@@ -23,6 +23,7 @@ export class AmbientEngine {
     this.time = 0;
     
     this.otherPlayers = {}; // multiplayer roster mapping
+    this.crops = {};        // farming crop tracking
     this.chests = {
       '14,8': ['Iron Ore x5', 'Hammer x1'],
       '51,42': ['Bread x6', 'Wheat x10'],
@@ -430,6 +431,25 @@ export class AmbientEngine {
   update(inputController) {
     this.time += 0.05;
     
+    // Update Crop Growth (Farming mechanics)
+    for (const coords in this.crops) {
+      const crop = this.crops[coords];
+      if (crop.stage < 3) {
+        crop.timer--;
+        if (crop.timer <= 0) {
+          crop.stage += 1;
+          const [cx, cy] = coords.split(',').map(Number);
+          if (crop.stage === 2) {
+            this.structureMap[cy][cx] = 7; // Growing crop stalks
+            crop.timer = 180; // time to reach stage 3
+          } else if (crop.stage === 3) {
+            this.structureMap[cy][cx] = 8; // Fully grown golden wheat stalks
+            crop.timer = 0;
+          }
+        }
+      }
+    }
+    
     // Update player movement interpolation
     if (this.player.moving) {
       this.player.moveProgress += this.player.speed;
@@ -609,9 +629,31 @@ export class AmbientEngine {
             ctx.fillStyle = '#613b1d';
             ctx.fillRect(tx + 2, ty + 4, this.tileSize - 4, this.tileSize - 8);
             break;
-          case 5: // Chest / Crop
-            ctx.fillStyle = '#7a5015';
-            ctx.fillRect(tx + 6, ty + 8, 20, 16);
+          case 5: // Chest or Sprout Crop (Stage 1)
+            if (this.chests[`${x},${y}`]) {
+              ctx.fillStyle = '#7a5015';
+              ctx.fillRect(tx + 6, ty + 8, 20, 16);
+              ctx.fillStyle = '#f1c40f';
+              ctx.fillRect(tx + 14, ty + 12, 4, 4);
+            } else {
+              ctx.fillStyle = '#2ecc71';
+              ctx.fillRect(tx + 14, ty + 20, 4, 6);
+            }
+            break;
+          case 7: // Growing Crop (Stage 2)
+            ctx.fillStyle = '#27ae60';
+            ctx.fillRect(tx + 10, ty + 12, 3, 14);
+            ctx.fillRect(tx + 18, ty + 15, 3, 11);
+            break;
+          case 8: // Fully Grown Crop (Stage 3)
+            ctx.fillStyle = '#f1c40f';
+            ctx.fillRect(tx + 8, ty + 6, 3, 20);
+            ctx.fillRect(tx + 16, ty + 4, 3, 22);
+            ctx.fillRect(tx + 24, ty + 8, 3, 18);
+            ctx.fillStyle = '#e67e22';
+            ctx.fillRect(tx + 6, ty + 6, 7, 4);
+            ctx.fillRect(tx + 14, ty + 4, 7, 4);
+            ctx.fillRect(tx + 22, ty + 8, 7, 4);
             break;
         }
       }
