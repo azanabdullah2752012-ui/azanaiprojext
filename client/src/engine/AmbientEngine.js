@@ -91,6 +91,7 @@ export class AmbientEngine {
     };
     
     this.lastHour = -1;
+    this.autonomousTalkTimer = 300;
     this.initializeMap();
     this.initializePlayer();
     this.initializeCitizens();
@@ -631,6 +632,92 @@ export class AmbientEngine {
     }
   }
 
+  runAutonomousTalk() {
+    // Proximity conversations between citizens
+    for (let i = 0; i < this.citizens.length; i++) {
+      const c1 = this.citizens[i];
+      for (let j = i + 1; j < this.citizens.length; j++) {
+        const c2 = this.citizens[j];
+        
+        const dist = Math.sqrt(Math.pow(c1.x - c2.x, 2) + Math.pow(c1.y - c2.y, 2));
+        if (dist <= 2.5 && !c1.chatBubble && !c2.chatBubble) {
+          const dialogues = [
+            {
+              c1: 'npc_alex', c2: 'npc_noah',
+              msg1: "Noah, got any wood blocks ready for the blacksmith forge?",
+              msg2: "Sure thing, Alex! I've loaded some logs."
+            },
+            {
+              c1: 'npc_sarah', c2: 'npc_lily',
+              msg1: "Morning Lily! Have you tried the hot baked buns?",
+              msg2: "They smell wonderful, Sarah! I'll grab one after lessons."
+            },
+            {
+              c1: 'npc_emma', c2: 'npc_ethan',
+              msg1: "Good day, Mayor Ethan. The clinic records are all filed.",
+              msg2: "Splendid work, Emma. The village health is in safe hands."
+            },
+            {
+              c1: 'npc_sarah', c2: 'npc_noah',
+              msg1: "Noah, your wheat fields are looking exceptionally gold!",
+              msg2: "Thank you, Sarah. The harvest yield is perfect."
+            },
+            {
+              c1: 'npc_alex', c2: 'npc_sarah',
+              msg1: "Hey Sarah, the bakery smell is drifting into the forge!",
+              msg2: "Baking bread keeps the village happy, Alex!"
+            },
+            {
+              c1: 'npc_lily', c2: 'npc_ethan',
+              msg1: "Mayor, the children are studying the village history maps.",
+              msg2: "Knowledge is the path to a great civilization, Lily!"
+            }
+          ];
+
+          const match = dialogues.find(d => 
+            (d.c1 === c1.id && d.c2 === c2.id) || 
+            (d.c1 === c2.id && d.c2 === c1.id)
+          );
+
+          if (match) {
+            const isReverse = match.c1 === c2.id;
+            const bubble1 = isReverse ? match.msg2 : match.msg1;
+            const bubble2 = isReverse ? match.msg1 : match.msg2;
+
+            c1.chatBubble = bubble1;
+            c1.chatTimer = 180;
+
+            setTimeout(() => {
+              c2.chatBubble = bubble2;
+              c2.chatTimer = 180;
+            }, 1000);
+
+            console.log(`[Conversation] ${c1.name}: "${bubble1}" -> ${c2.name}: "${bubble2}"`);
+            return; 
+          }
+        }
+      }
+    }
+
+    // Mutter thoughts if alone (20% chance if no one spoke)
+    if (Math.random() < 0.25) {
+      const lonelyNPC = this.citizens[Math.floor(Math.random() * this.citizens.length)];
+      if (!lonelyNPC.chatBubble) {
+        const thoughts = {
+          npc_alex: ["Whew, the anvil forge fire is burning hot today!", "Need to hammer out some more iron tools.", "I should inspect the storage chests."],
+          npc_sarah: ["Nothing beats the aroma of fresh baked cinnamon bread!", "I hope the traveler likes my muffins.", "Need to gather more wheat seeds."],
+          npc_noah: ["The crops are growing strong under the sun.", "Time to till the field soil again.", "Let's check the water pond levels."],
+          npc_emma: ["Stay safe, eat healthy! Check your energy stats.", "Reviewing clinic prescription lists.", "Hope everyone is feeling well today."],
+          npc_lily: ["Education is the spark that lights the fire of life.", "So many assignments left to grade...", "Time for the afternoon square reading."],
+          npc_ethan: ["This village will stand tall as a sanctuary.", "Let's inspect the dirt roads and cottage structures.", "Taxes keep the Town Hall running smoothly."]
+        };
+        const list = thoughts[lonelyNPC.id] || ["Just a nice quiet day in AmbientSpaces."];
+        lonelyNPC.chatBubble = list[Math.floor(Math.random() * list.length)];
+        lonelyNPC.chatTimer = 150;
+      }
+    }
+  }
+
   // Sockets helpers for Multiplayer Sync
   addOtherPlayer(playerInfo) {
     this.otherPlayers[playerInfo.id] = {
@@ -696,6 +783,13 @@ export class AmbientEngine {
     if (currentHour !== this.lastHour) {
       this.lastHour = currentHour;
       this.runAutonomousEconomyTick();
+    }
+
+    // Update Autonomous Citizen Conversations Ticker
+    this.autonomousTalkTimer--;
+    if (this.autonomousTalkTimer <= 0) {
+      this.autonomousTalkTimer = 300;
+      this.runAutonomousTalk();
     }
 
     // 1. Update citizen position interpolation & step execution
@@ -1063,6 +1157,12 @@ export class AmbientEngine {
   
   drawChatBubble(char) {
     if (!char.chatBubble) return;
+
+    // Proximity check: Only show chat bubbles if within 6 grid cells of the player
+    if (char.id !== 'local_player') {
+      const dist = Math.sqrt(Math.pow(this.player.x - char.x, 2) + Math.pow(this.player.y - char.y, 2));
+      if (dist > 6) return;
+    }
     
     const ctx = this.ctx;
     const drawX = (char.x + (char.targetX - char.x) * char.moveProgress) * this.tileSize;
