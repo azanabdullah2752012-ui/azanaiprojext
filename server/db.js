@@ -34,6 +34,45 @@ function initializeDatabase() {
         PRIMARY KEY (npc_id, player_name)
       )
     `);
+
+    // 3. World State (Maps persistence)
+    db.run(`
+      CREATE TABLE IF NOT EXISTS world_state (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      )
+    `);
+
+    // 4. Citizen States
+    db.run(`
+      CREATE TABLE IF NOT EXISTS citizen_states (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        job TEXT,
+        x INTEGER,
+        y INTEGER,
+        money INTEGER,
+        inventory TEXT
+      )
+    `);
+
+    // 5. Player States
+    db.run(`
+      CREATE TABLE IF NOT EXISTS player_states (
+        username TEXT PRIMARY KEY,
+        level INTEGER,
+        xp INTEGER,
+        hp INTEGER,
+        max_hp INTEGER,
+        atk INTEGER,
+        def INTEGER,
+        money INTEGER,
+        inventory TEXT,
+        color TEXT,
+        x INTEGER,
+        y INTEGER
+      )
+    `);
     
     console.log('[SQLite] Database schemas initialized.');
   });
@@ -118,6 +157,55 @@ const dbService = {
     await dbService.addMemory(npcId, playerName, memoryText, delta);
 
     return { trust: newTrust, delta };
+  },
+
+  saveWorldMap: async (key, mapData) => {
+    const value = JSON.stringify(mapData);
+    const sql = `INSERT INTO world_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?`;
+    await runQuery(sql, [key, value, value]);
+  },
+
+  loadWorldMap: async (key) => {
+    const sql = `SELECT value FROM world_state WHERE key = ?`;
+    const row = await getQuery(sql, [key]);
+    return row ? JSON.parse(row.value) : null;
+  },
+
+  saveCitizen: async (cit) => {
+    const invStr = JSON.stringify(cit.inventory || []);
+    const sql = `INSERT INTO citizen_states (id, name, job, x, y, money, inventory) VALUES (?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET name = ?, job = ?, x = ?, y = ?, money = ?, inventory = ?`;
+    await runQuery(sql, [cit.id, cit.name, cit.job, cit.x, cit.y, cit.money, invStr, cit.name, cit.job, cit.x, cit.y, cit.money, invStr]);
+  },
+
+  loadCitizens: async () => {
+    const sql = `SELECT * FROM citizen_states`;
+    const rows = await allQuery(sql);
+    return rows.map(r => ({
+      ...r,
+      inventory: JSON.parse(r.inventory || '[]')
+    }));
+  },
+
+  savePlayer: async (player) => {
+    const invStr = JSON.stringify(player.inventory || []);
+    const sql = `INSERT INTO player_states (username, level, xp, hp, max_hp, atk, def, money, inventory, color, x, y)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(username) DO UPDATE SET level = ?, xp = ?, hp = ?, max_hp = ?, atk = ?, def = ?, money = ?, inventory = ?, color = ?, x = ?, y = ?`;
+    await runQuery(sql, [
+      player.username, player.level, player.xp, player.hp, player.maxHp, player.atk, player.def, player.money, invStr, player.color, player.x, player.y,
+      player.level, player.xp, player.hp, player.maxHp, player.atk, player.def, player.money, invStr, player.color, player.x, player.y
+    ]);
+  },
+
+  loadPlayer: async (username) => {
+    const sql = `SELECT * FROM player_states WHERE username = ?`;
+    const row = await getQuery(sql, [username]);
+    if (!row) return null;
+    return {
+      ...row,
+      inventory: JSON.parse(row.inventory || '[]')
+    };
   }
 };
 

@@ -30,41 +30,114 @@ const io = new Server(server, {
   }
 });
 
-// In-memory player state tracker
+// In-memory maps & state trackers
+let serverTerrainMap = null;
+let serverStructureMap = null;
+let mapsInitialized = false;
 const activePlayers = {};
+
+async function loadServerMaps() {
+  try {
+    const terrain = await db.loadWorldMap('terrain_map');
+    const structure = await db.loadWorldMap('structure_map');
+    if (terrain && structure) {
+      serverTerrainMap = terrain;
+      serverStructureMap = structure;
+      mapsInitialized = true;
+      console.log('[SQLite] Persisted world maps loaded successfully.');
+    } else {
+      console.log('[SQLite] No persisted maps found. Will initialize on first client connection.');
+    }
+  } catch (err) {
+    console.error('[SQLite] Error loading maps:', err.message);
+  }
+}
+loadServerMaps();
 
 // Real-time synchronization namespace
 io.on('connection', (socket) => {
   console.log(`[Socket] Client connected: ${socket.id}`);
+
+  // Request/Response world maps
+  socket.on('request-map', () => {
+    if (mapsInitialized) {
+      socket.emit('load-map', { terrain: serverTerrainMap, structure: serverStructureMap });
+    } else {
+      socket.emit('load-map', { status: 'empty' });
+    }
+  });
+
+  socket.on('save-map', async (mapData) => {
+    serverTerrainMap = mapData.terrain;
+    serverStructureMap = mapData.structure;
+    mapsInitialized = true;
+    try {
+      await db.saveWorldMap('terrain_map', serverTerrainMap);
+      await db.saveWorldMap('structure_map', serverStructureMap);
+      console.log('[SQLite] Initial map state saved to database.');
+    } catch (err) {
+      console.error('[SQLite] Error saving maps:', err.message);
+    }
+  });
   
   // Player joined world event
-  socket.on('join-world', (playerInfo) => {
-    // Generate state details
-    const newPlayer = {
+  socket.on('join-world', async (playerInfo) => {
+    const username = playerInfo.name || `Player_${socket.id.substring(0, 4)}`;
+    
+    let dbPlayer = null;
+    try {
+      dbPlayer = await db.loadPlayer(username);
+    } catch (err) {
+      console.error('[SQLite] Error loading player:', err.message);
+    }
+
+    const defaultPlayer = {
       id: socket.id,
-      name: playerInfo.name || `Player_${socket.id.substring(0, 4)}`,
+      name: username,
       color: playerInfo.color || '#00f0ff',
-      x: playerInfo.x !== undefined ? playerInfo.x : 10,
-      y: playerInfo.y !== undefined ? playerInfo.y : 13,
-      facing: 'down'
+      x: playerInfo.x !== undefined ? playerInfo.x : 32,
+      y: playerInfo.y !== undefined ? playerInfo.y : 34,
+      facing: 'down',
+      level: 1,
+      xp: 0,
+      hp: 100,
+      maxHp: 100,
+      atk: 10,
+      def: 2,
+      money: 50,
+      inventory: ['Bread x2', 'Apple x2']
     };
+
+    const finalPlayer = dbPlayer ? {
+      ...defaultPlayer,
+      color: dbPlayer.color || defaultPlayer.color,
+      x: dbPlayer.x !== undefined ? dbPlayer.x : defaultPlayer.x,
+      y: dbPlayer.y !== undefined ? dbPlayer.y : defaultPlayer.y,
+      level: dbPlayer.level,
+      xp: dbPlayer.xp,
+      hp: dbPlayer.hp,
+      maxHp: dbPlayer.max_hp,
+      atk: dbPlayer.atk,
+      def: dbPlayer.def,
+      money: dbPlayer.money,
+      inventory: dbPlayer.inventory
+    } : defaultPlayer;
+
+    activePlayers[socket.id] = finalPlayer;
+    console.log(`[Socket] Player registered: ${username} (${socket.id})`);
     
-    activePlayers[socket.id] = newPlayer;
-    console.log(`[Socket] Player registered: ${newPlayer.name} (${socket.id})`);
-    
-    // 1. Send currently online players to the joining client
+    socket.emit('load-player-profile', finalPlayer);
+
     socket.emit('world-state', {
       players: Object.values(activePlayers).filter(p => p.id !== socket.id)
     });
     
-    // 2. Broadcast join status to everyone else
-    socket.broadcast.emit('player-joined', newPlayer);
+    socket.broadcast.emit('player-joined', finalPlayer);
     
-    // 3. Log join announcement in chat
     io.emit('chat-sync', {
       sender: 'System',
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      text: `${newPlayer.name} has joined the civilization.`,
+      text: `${username} has joined the civilization.`,
       type: 'system'
     });
   });
@@ -137,6 +210,54 @@ io.on('connection', (socket) => {
       delete activePlayers[socket.id];
     } else {
       console.log(`[Socket] Unregistered connection closed: ${socket.id}`);
+    }
+  });
+
+  socket.on('save-player-rpg', async (playerData) => {
+    try {
+      await db.savePlayer({
+        username: playerData.name,
+        level: playerData.level,
+        xp: playerData.xp,
+        hp: playerData.hp,
+        maxHp: playerData.maxHp,
+        atk: playerData.atk,
+        def: playerData.def,
+        money: playerData.money,
+        inventory: playerData.inventory,
+        color: playerData.color,
+        x: playerData.x,
+        y: playerData.y
+      });
+    } catch (err) {
+      console.error('[SQLite] Error saving player stats:', err.message);
+    }
+  });
+
+  socket.on('save-citizens', async (citizenList) => {
+    try {
+      for (const cit of citizenList) {
+        await db.saveCitizen({
+          id: cit.id,
+          name: cit.name,
+          job: cit.job,
+          x: cit.x,
+          y: cit.y,
+          money: cit.money,
+          inventory: cit.inventory
+        });
+      }
+    } catch (err) {
+      console.error('[SQLite] Error saving citizen states:', err.message);
+    }
+  });
+
+  socket.on('request-citizens', async () => {
+    try {
+      const dbCitizens = await db.loadCitizens();
+      socket.emit('load-citizens-state', dbCitizens);
+    } catch (err) {
+      console.error('[SQLite] Error loading citizen states:', err.message);
     }
   });
 });

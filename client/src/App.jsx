@@ -217,6 +217,54 @@ export default function App() {
         }
       }
     });
+    socket.on('load-map', (data) => {
+      if (data.status === 'empty') {
+        socket.emit('save-map', { terrain: engine.terrainMap, structure: engine.structureMap });
+      } else {
+        engine.terrainMap = data.terrain;
+        engine.structureMap = data.structure;
+      }
+    });
+
+    socket.on('load-player-profile', (profile) => {
+      setPlayerLevel(profile.level);
+      setPlayerXP(profile.xp);
+      setPlayerHP(profile.hp);
+      setPlayerMaxHP(profile.maxHp);
+      setPlayerATK(profile.atk);
+      setPlayerDEF(profile.def);
+      setPlayerMoney(profile.money);
+      setPlayerInventory(profile.inventory);
+      
+      engine.player.x = profile.x;
+      engine.player.y = profile.y;
+      engine.player.targetX = profile.x;
+      engine.player.targetY = profile.y;
+      engine.player.inventory = profile.inventory;
+      engine.player.def = profile.def;
+      setPlayerCoords({ x: profile.x, y: profile.y });
+    });
+
+    socket.on('load-citizens-state', (citizensData) => {
+      if (citizensData && citizensData.length > 0) {
+        citizensData.forEach(cit => {
+          const match = engine.citizens.find(c => c.id === cit.id);
+          if (match) {
+            match.name = cit.name;
+            match.job = cit.job;
+            match.x = cit.x;
+            match.y = cit.y;
+            match.targetX = cit.x;
+            match.targetY = cit.y;
+            match.money = cit.money;
+            match.inventory = cit.inventory;
+          }
+        });
+      }
+    });
+
+    socket.emit('request-map');
+    socket.emit('request-citizens');
     
     let animationFrameId;
     let lastTime = 0;
@@ -420,6 +468,49 @@ export default function App() {
       cancelAnimationFrame(animationFrameId);
       socket.disconnect();
     };
+  }, [joined]);
+
+  // Autosave loop to database every 30 seconds
+  useEffect(() => {
+    if (!joined) return;
+    
+    const interval = setInterval(() => {
+      const engine = engineRef.current;
+      const socket = socketRef.current;
+      if (!engine || !socket) return;
+
+      // 1. Save Player RPG Stats
+      socket.emit('save-player-rpg', {
+        name: username,
+        level: playerLevelRef.current,
+        xp: playerXPRef.current,
+        hp: playerHPRef.current,
+        maxHp: playerMaxHPRef.current,
+        atk: playerATKRef.current,
+        def: playerDEFRef.current,
+        money: playerMoneyRef.current,
+        inventory: playerInventoryRef.current,
+        color: selectedColor,
+        x: engine.player.x,
+        y: engine.player.y
+      });
+
+      // 2. Save Citizens Coordinates/Money/Inventories
+      const citizensList = engine.citizens.map(c => ({
+        id: c.id,
+        name: c.name,
+        job: c.job,
+        x: c.x,
+        y: c.y,
+        money: c.money,
+        inventory: c.inventory
+      }));
+      socket.emit('save-citizens', citizensList);
+
+      console.log('[Autosave] World state successfully written to SQLite.');
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, [joined]);
   
   // Dialog trigger with NPC
@@ -969,6 +1060,21 @@ export default function App() {
 
   const playerATKRef = useRef(10);
   playerATKRef.current = playerATK;
+
+  const playerXPRef = useRef(0);
+  playerXPRef.current = playerXP;
+
+  const playerMaxHPRef = useRef(100);
+  playerMaxHPRef.current = playerMaxHP;
+
+  const playerDEFRef = useRef(2);
+  playerDEFRef.current = playerDEF;
+
+  const playerMoneyRef = useRef(50);
+  playerMoneyRef.current = playerMoney;
+
+  const playerInventoryRef = useRef([]);
+  playerInventoryRef.current = playerInventory;
 
   const simTimeRef = useRef(null);
   simTimeRef.current = simTime;
